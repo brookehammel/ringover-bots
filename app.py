@@ -45,11 +45,18 @@ st.markdown("""
 def load_credentials():
     """Load API keys and settings from Streamlit secrets or secrets.toml."""
     try:
+        # BOT_MODE controls which bot(s) this deployment shows:
+        #   "both" = show toggle for both bots (default)
+        #   "bob_only" = only show the Book of Business Bot
+        #   "process_only" = only show the Process Bot
+        bot_mode = st.secrets["secrets"].get("BOT_MODE", "both").lower().strip()
+
         config = {
             "anthropic_api_key": st.secrets["secrets"]["ANTHROPIC_API_KEY"],
-            "google_sheet_id": st.secrets["secrets"]["GOOGLE_SHEET_ID"],
-            "google_drive_folder_id": st.secrets["secrets"]["GOOGLE_DRIVE_FOLDER_ID"],
+            "google_sheet_id": st.secrets["secrets"].get("GOOGLE_SHEET_ID", ""),
+            "google_drive_folder_id": st.secrets["secrets"].get("GOOGLE_DRIVE_FOLDER_ID", ""),
             "google_credentials": json.loads(st.secrets["secrets"]["GOOGLE_CREDENTIALS_JSON"]),
+            "bot_mode": bot_mode,
         }
         return config
     except Exception as e:
@@ -315,17 +322,30 @@ def main():
     # Load credentials
     config = load_credentials()
 
-    # Sidebar - Bot Selection
-    with st.sidebar:
-        st.markdown("### 🤖 Choose Your Bot")
-        bot_mode = st.radio(
-            "Which bot do you want to talk to?",
-            ["📊 Book of Business Bot", "📋 Process Bot"],
-            index=0,
-            label_visibility="collapsed"
-        )
+    # Determine which bot(s) to show based on BOT_MODE setting
+    deploy_mode = config["bot_mode"]
+    if deploy_mode == "bob_only":
+        bot_mode = "📊 Book of Business Bot"
+        show_toggle = False
+    elif deploy_mode == "process_only":
+        bot_mode = "📋 Process Bot"
+        show_toggle = False
+    else:
+        bot_mode = None  # Will be set by toggle below
+        show_toggle = True
 
-        st.markdown("---")
+    # Sidebar - Bot Selection (only if both bots are enabled)
+    with st.sidebar:
+        if show_toggle:
+            st.markdown("### 🤖 Choose Your Bot")
+            bot_mode = st.radio(
+                "Which bot do you want to talk to?",
+                ["📊 Book of Business Bot", "📋 Process Bot"],
+                index=0,
+                label_visibility="collapsed"
+            )
+            st.markdown("---")
+
         st.markdown("### 📡 Connection Status")
 
         if bot_mode == "📊 Book of Business Bot":
