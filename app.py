@@ -137,26 +137,53 @@ st.markdown(f"""
         color: {WHITE} !important;
     }}
 
-    /* Main content area text — force white on navy */
-    .main .block-container,
-    .main .block-container p,
-    .main .block-container li,
-    .main .block-container span,
-    .main .block-container strong,
-    .main .block-container em,
-    .main .block-container h1,
-    .main .block-container h2,
-    .main .block-container h3,
-    .main .block-container h4,
-    .main .block-container h5,
-    .main .block-container h6,
-    .main .block-container td,
-    .main .block-container th,
-    .main .block-container label {{
+    /* Main content area text — force white on navy (aggressive overrides) */
+    html body .main .block-container,
+    html body .main .block-container div,
+    html body .main .block-container p,
+    html body .main .block-container li,
+    html body .main .block-container span,
+    html body .main .block-container strong,
+    html body .main .block-container em,
+    html body .main .block-container h1,
+    html body .main .block-container h2,
+    html body .main .block-container h3,
+    html body .main .block-container h4,
+    html body .main .block-container h5,
+    html body .main .block-container h6,
+    html body .main .block-container td,
+    html body .main .block-container th,
+    html body .main .block-container label,
+    html body .stMarkdown,
+    html body .stMarkdown *,
+    html body [data-testid="stMarkdownContainer"],
+    html body [data-testid="stMarkdownContainer"] *,
+    html body [data-testid="stChatMessageContent"],
+    html body [data-testid="stChatMessageContent"] *,
+    html body [data-testid="stSpinner"],
+    html body [data-testid="stSpinner"] *,
+    html body [data-testid="stSpinner"] div {{
         color: {WHITE} !important;
     }}
-    .main .block-container a {{
+    html body .main .block-container a,
+    html body .stMarkdown a {{
         color: {TEAL} !important;
+    }}
+
+    /* Keep button text in its intended color (overrides above) */
+    html body .stButton > button,
+    html body .stButton > button * {{
+        color: {NAVY} !important;
+    }}
+    html body .stButton > button:hover,
+    html body .stButton > button:hover * {{
+        color: {NAVY} !important;
+    }}
+
+    /* Keep chat input text navy on its white background */
+    html body [data-testid="stChatInput"] textarea,
+    html body .stChatInput textarea {{
+        color: {NAVY} !important;
     }}
 
     /* Custom classes */
