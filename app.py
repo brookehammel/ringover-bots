@@ -57,11 +57,31 @@ st.markdown(f"""
         border-radius: 6px;
     }}
 
-    /* Chat input */
-    .stChatInput textarea, [data-testid="stChatInput"] textarea {{
-        background-color: #00122a !important;
-        color: {WHITE} !important;
+    /* Chat input — light background */
+    [data-testid="stChatInput"] {{
+        background-color: {WHITE} !important;
+        border-radius: 8px;
+    }}
+    [data-testid="stChatInput"] > div {{
+        background-color: {WHITE} !important;
         border: 1px solid {TEAL} !important;
+        border-radius: 8px;
+    }}
+    .stChatInput textarea, [data-testid="stChatInput"] textarea {{
+        background-color: {WHITE} !important;
+        color: {NAVY} !important;
+        border: none !important;
+        caret-color: {NAVY} !important;
+    }}
+    .stChatInput textarea::placeholder, [data-testid="stChatInput"] textarea::placeholder {{
+        color: #8a9ba8 !important;
+    }}
+    /* Send button inside chat input */
+    [data-testid="stChatInput"] button {{
+        color: {NAVY} !important;
+    }}
+    [data-testid="stChatInput"] button svg {{
+        fill: {NAVY} !important;
     }}
 
     /* Default Streamlit buttons */
