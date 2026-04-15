@@ -107,6 +107,57 @@ st.markdown(f"""
         border-radius: 10px;
         padding: 0.5rem 1rem;
     }}
+    [data-testid="stChatMessage"] *,
+    [data-testid="stChatMessage"] p,
+    [data-testid="stChatMessage"] li,
+    [data-testid="stChatMessage"] span,
+    [data-testid="stChatMessage"] strong,
+    [data-testid="stChatMessage"] em,
+    [data-testid="stChatMessage"] h1,
+    [data-testid="stChatMessage"] h2,
+    [data-testid="stChatMessage"] h3,
+    [data-testid="stChatMessage"] h4,
+    [data-testid="stChatMessage"] h5,
+    [data-testid="stChatMessage"] h6,
+    [data-testid="stChatMessage"] td,
+    [data-testid="stChatMessage"] th {{
+        color: {WHITE} !important;
+    }}
+    [data-testid="stChatMessage"] a {{
+        color: {TEAL} !important;
+    }}
+    [data-testid="stChatMessage"] code {{
+        background-color: #00122a !important;
+        color: {TEAL} !important;
+        padding: 2px 6px;
+        border-radius: 4px;
+    }}
+    [data-testid="stChatMessage"] pre code {{
+        background-color: #00122a !important;
+        color: {WHITE} !important;
+    }}
+
+    /* Main content area text — force white on navy */
+    .main .block-container,
+    .main .block-container p,
+    .main .block-container li,
+    .main .block-container span,
+    .main .block-container strong,
+    .main .block-container em,
+    .main .block-container h1,
+    .main .block-container h2,
+    .main .block-container h3,
+    .main .block-container h4,
+    .main .block-container h5,
+    .main .block-container h6,
+    .main .block-container td,
+    .main .block-container th,
+    .main .block-container label {{
+        color: {WHITE} !important;
+    }}
+    .main .block-container a {{
+        color: {TEAL} !important;
+    }}
 
     /* Custom classes */
     .main-header {{
