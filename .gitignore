@@ -1,0 +1,21 @@
+# Secrets — never commit these to GitHub
+.streamlit/
+credentials.json
+secrets.toml
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+env/
+.env
+
+# OS / Editor junk
+.DS_Store
+desktop.ini
+Thumbs.db
+.vscode/
+.idea/

@@ -7,6 +7,8 @@ import anthropic
 import json
 import csv
 import io
+import base64
+import os
 
 # ============================================================
 # RINGOVER BOTS
@@ -20,43 +22,192 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Styling ---
-st.markdown("""
+# --- Ringover Brand Colors ---
+NAVY = "#001b39"
+TEAL = "#27c9d6"
+WHITE = "#ffffff"
+
+# --- Styling (Ringover branding with Poppins font) ---
+st.markdown(f"""
 <style>
-    .stApp { background-color: #f8f9fa; }
-    .main-header {
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+
+    html, body, [class*="css"], .stApp, .stMarkdown, .stTextInput, .stButton {{
+        font-family: 'Poppins', sans-serif !important;
+    }}
+
+    .stApp {{
+        background-color: {NAVY};
+        color: {WHITE};
+    }}
+
+    /* Sidebar */
+    [data-testid="stSidebar"] {{
+        background-color: #00122a;
+    }}
+    [data-testid="stSidebar"] * {{
+        color: {WHITE} !important;
+    }}
+
+    /* Text input */
+    .stTextInput input {{
+        background-color: #00122a;
+        color: {WHITE};
+        border: 1px solid {TEAL};
+        border-radius: 6px;
+    }}
+
+    /* Chat input */
+    .stChatInput textarea, [data-testid="stChatInput"] textarea {{
+        background-color: #00122a !important;
+        color: {WHITE} !important;
+        border: 1px solid {TEAL} !important;
+    }}
+
+    /* Default Streamlit buttons */
+    .stButton > button {{
+        background-color: {TEAL};
+        color: {NAVY};
+        font-family: 'Poppins', sans-serif;
+        font-weight: 600;
+        border: none;
+        border-radius: 8px;
+        padding: 0.6rem 1.4rem;
+        transition: all 0.2s ease;
+    }}
+    .stButton > button:hover {{
+        background-color: {WHITE};
+        color: {NAVY};
+        transform: translateY(-1px);
+    }}
+
+    /* Chat messages */
+    [data-testid="stChatMessage"] {{
+        background-color: #002a4f !important;
+        border-radius: 10px;
+        padding: 0.5rem 1rem;
+    }}
+
+    /* Custom classes */
+    .main-header {{
+        font-family: 'Poppins', sans-serif;
         font-size: 2rem;
         font-weight: 700;
-        color: #2E5090;
-        margin-bottom: 0.5rem;
-    }
-    .sub-header {
+        color: {WHITE};
+        margin-bottom: 0.25rem;
+    }}
+    .sub-header {{
+        font-family: 'Poppins', sans-serif;
         font-size: 1rem;
-        color: #666;
-        margin-bottom: 2rem;
-    }
-    .status-connected { color: #4CAF50; font-weight: 600; }
-    .status-error { color: #f44336; font-weight: 600; }
+        color: #b8d4e3;
+        margin-bottom: 1.5rem;
+    }}
+    .status-connected {{ color: {TEAL}; font-weight: 600; }}
+    .status-error {{ color: #ff6b6b; font-weight: 600; }}
+
+    /* Landing page styling */
+    .landing-question {{
+        font-family: 'Poppins', sans-serif;
+        font-size: 2.2rem;
+        font-weight: 600;
+        color: {WHITE};
+        text-align: center;
+        margin: 2rem 0 2.5rem 0;
+    }}
+    .landing-subtitle {{
+        font-family: 'Poppins', sans-serif;
+        font-size: 1.05rem;
+        font-weight: 300;
+        color: #b8d4e3;
+        text-align: center;
+        margin-bottom: 3rem;
+    }}
+
+    /* Big landing buttons */
+    .big-bot-button {{
+        display: block;
+        width: 100%;
+        background-color: {TEAL};
+        color: {NAVY} !important;
+        font-family: 'Poppins', sans-serif;
+        font-size: 1.4rem;
+        font-weight: 600;
+        text-align: center;
+        padding: 2.5rem 1rem;
+        border-radius: 14px;
+        text-decoration: none !important;
+        transition: all 0.25s ease;
+        border: 2px solid {TEAL};
+    }}
+    .big-bot-button:hover {{
+        background-color: {NAVY};
+        color: {TEAL} !important;
+        border: 2px solid {TEAL};
+        transform: translateY(-3px);
+    }}
+    .big-bot-emoji {{
+        font-size: 2.5rem;
+        display: block;
+        margin-bottom: 0.5rem;
+    }}
+    .big-bot-caption {{
+        font-size: 0.9rem;
+        font-weight: 400;
+        margin-top: 0.5rem;
+        opacity: 0.85;
+    }}
+
+    /* Hide the default Streamlit header/footer branding */
+    #MainMenu {{ visibility: hidden; }}
+    footer {{ visibility: hidden; }}
+    header {{ visibility: hidden; }}
 </style>
 """, unsafe_allow_html=True)
+
+
+# --- Logo Helper ---
+def get_logo_base64():
+    """Load the Ringover logo as base64 for inline embedding."""
+    logo_path = os.path.join(os.path.dirname(__file__), "ringover-logo.png")
+    if os.path.exists(logo_path):
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+    return None
+
+
+def show_logo(max_width_px=320):
+    """Display the Ringover logo centered at the top."""
+    logo_b64 = get_logo_base64()
+    if logo_b64:
+        st.markdown(
+            f"""
+            <div style="text-align: center; margin-top: 1.5rem; margin-bottom: 1rem;">
+                <img src="data:image/png;base64,{logo_b64}" style="max-width: {max_width_px}px; width: 80%;" />
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        # Fallback text if logo file not found
+        st.markdown(
+            f"""
+            <div style="text-align: center; margin-top: 1.5rem; margin-bottom: 1rem;">
+                <span style="color: {TEAL}; font-family: Poppins; font-weight: 700; font-size: 2.5rem;">ringover</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 # --- Load Credentials ---
 def load_credentials():
     """Load API keys and settings from Streamlit secrets or secrets.toml."""
     try:
-        # BOT_MODE controls which bot(s) this deployment shows:
-        #   "both" = show toggle for both bots (default)
-        #   "bob_only" = only show the Book of Business Bot
-        #   "process_only" = only show the Process Bot
-        bot_mode = st.secrets["secrets"].get("BOT_MODE", "both").lower().strip()
-
         config = {
             "anthropic_api_key": st.secrets["secrets"]["ANTHROPIC_API_KEY"],
             "google_sheet_id": st.secrets["secrets"].get("GOOGLE_SHEET_ID", ""),
             "google_drive_folder_id": st.secrets["secrets"].get("GOOGLE_DRIVE_FOLDER_ID", ""),
             "google_credentials": json.loads(st.secrets["secrets"]["GOOGLE_CREDENTIALS_JSON"]),
-            "bot_mode": bot_mode,
             "app_password": st.secrets["secrets"].get("APP_PASSWORD", ""),
         }
         return config
@@ -68,33 +219,31 @@ def load_credentials():
 # --- Password Protection ---
 def check_password(expected_password):
     """Returns True if user has entered the correct password."""
-    # If no password is configured, skip the gate
     if not expected_password:
         return True
 
-    # If already authenticated in this session, allow through
     if st.session_state.get("authenticated", False):
         return True
 
-    # Show password prompt
-    st.markdown('<div class="main-header">🔒 Ringover Bots</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Please enter the access password to continue.</div>', unsafe_allow_html=True)
+    show_logo(max_width_px=260)
+    st.markdown('<div class="landing-question" style="font-size:1.6rem;">Please enter the access password</div>', unsafe_allow_html=True)
 
-    password = st.text_input("Password", type="password", key="password_input")
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        password = st.text_input("Password", type="password", key="password_input", label_visibility="collapsed", placeholder="Password")
 
-    if password:
-        if password == expected_password:
-            st.session_state["authenticated"] = True
-            st.rerun()
-        else:
-            st.error("❌ Incorrect password. Please try again.")
+        if password:
+            if password == expected_password:
+                st.session_state["authenticated"] = True
+                st.rerun()
+            else:
+                st.error("❌ Incorrect password. Please try again.")
 
     return False
 
 
 # --- Google Auth Helper ---
 def get_google_creds(credentials_info):
-    """Create Google credentials with both Sheets and Drive access."""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets.readonly",
         "https://www.googleapis.com/auth/drive.readonly",
@@ -108,7 +257,6 @@ def get_google_creds(credentials_info):
 
 @st.cache_data(ttl=300)
 def load_sheet_data(_credentials, sheet_id):
-    """Connect to Google Sheets and read the Book of Business data."""
     creds = get_google_creds(_credentials)
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(sheet_id)
@@ -118,7 +266,6 @@ def load_sheet_data(_credentials, sheet_id):
 
 
 def data_to_summary(data):
-    """Create a concise summary of the data for the AI, including all rows as CSV."""
     if not data:
         return "No data found in the spreadsheet."
 
@@ -169,7 +316,6 @@ HERE IS THE CURRENT DATA FROM THE GOOGLE SHEET:
 
 @st.cache_data(ttl=600)
 def load_drive_documents(_credentials, folder_id):
-    """Read all documents from a Google Drive folder."""
     creds = get_google_creds(_credentials)
     service = build("drive", "v3", credentials=creds)
 
@@ -189,24 +335,19 @@ def load_drive_documents(_credentials, folder_id):
             name = file["name"]
             file_id = file["id"]
 
-            # Recurse into subfolders
             if mime == "application/vnd.google-apps.folder":
                 read_folder(file_id)
                 continue
 
-            # Read Google Docs
             if mime == "application/vnd.google-apps.document":
                 try:
-                    content = service.files().export(
-                        fileId=file_id, mimeType="text/plain"
-                    ).execute()
+                    content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
                     if isinstance(content, bytes):
                         content = content.decode("utf-8")
                     documents.append({"name": name, "content": content})
                 except Exception:
                     documents.append({"name": name, "content": "[Could not read this document]"})
 
-            # Read text files, PDFs (as text), etc.
             elif mime in ["text/plain", "text/csv", "text/markdown"]:
                 try:
                     request = service.files().get_media(fileId=file_id)
@@ -220,60 +361,45 @@ def load_drive_documents(_credentials, folder_id):
                 except Exception:
                     documents.append({"name": name, "content": "[Could not read this file]"})
 
-            # Read Google Sheets as CSV
             elif mime == "application/vnd.google-apps.spreadsheet":
                 try:
-                    content = service.files().export(
-                        fileId=file_id, mimeType="text/csv"
-                    ).execute()
+                    content = service.files().export(fileId=file_id, mimeType="text/csv").execute()
                     if isinstance(content, bytes):
                         content = content.decode("utf-8")
                     documents.append({"name": name, "content": content})
                 except Exception:
                     documents.append({"name": name, "content": "[Could not read this spreadsheet]"})
 
-            # Read Google Slides as text
             elif mime == "application/vnd.google-apps.presentation":
                 try:
-                    content = service.files().export(
-                        fileId=file_id, mimeType="text/plain"
-                    ).execute()
+                    content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
                     if isinstance(content, bytes):
                         content = content.decode("utf-8")
                     documents.append({"name": name, "content": content})
                 except Exception:
                     documents.append({"name": name, "content": "[Could not read this presentation]"})
 
-            # Handle shortcuts by resolving to actual file
             elif mime == "application/vnd.google-apps.shortcut":
                 try:
-                    shortcut_details = service.files().get(
-                        fileId=file_id, fields="shortcutDetails"
-                    ).execute()
+                    shortcut_details = service.files().get(fileId=file_id, fields="shortcutDetails").execute()
                     target_id = shortcut_details.get("shortcutDetails", {}).get("targetId")
                     target_mime = shortcut_details.get("shortcutDetails", {}).get("targetMimeType", "")
 
                     if target_id:
                         if target_mime == "application/vnd.google-apps.document":
-                            content = service.files().export(
-                                fileId=target_id, mimeType="text/plain"
-                            ).execute()
+                            content = service.files().export(fileId=target_id, mimeType="text/plain").execute()
                             if isinstance(content, bytes):
                                 content = content.decode("utf-8")
                             documents.append({"name": name + " (shortcut)", "content": content})
                         elif target_mime == "application/vnd.google-apps.folder":
                             read_folder(target_id)
                         elif target_mime == "application/vnd.google-apps.spreadsheet":
-                            content = service.files().export(
-                                fileId=target_id, mimeType="text/csv"
-                            ).execute()
+                            content = service.files().export(fileId=target_id, mimeType="text/csv").execute()
                             if isinstance(content, bytes):
                                 content = content.decode("utf-8")
                             documents.append({"name": name + " (shortcut)", "content": content})
                         elif target_mime == "application/vnd.google-apps.presentation":
-                            content = service.files().export(
-                                fileId=target_id, mimeType="text/plain"
-                            ).execute()
+                            content = service.files().export(fileId=target_id, mimeType="text/plain").execute()
                             if isinstance(content, bytes):
                                 content = content.decode("utf-8")
                             documents.append({"name": name + " (shortcut)", "content": content})
@@ -285,14 +411,12 @@ def load_drive_documents(_credentials, folder_id):
 
 
 def documents_to_summary(documents):
-    """Format documents for the AI."""
     if not documents:
         return "No documents found in the Google Drive folder."
 
     summary = f"Found {len(documents)} documents in the process folder:\n\n"
     for doc in documents:
         summary += f"--- DOCUMENT: {doc['name']} ---\n"
-        # Truncate very long documents to avoid token limits
         content = doc["content"]
         if len(content) > 15000:
             content = content[:15000] + "\n... [Document truncated due to length]"
@@ -326,7 +450,6 @@ HERE ARE THE CURRENT PROCESS DOCUMENTS:
 # ============================================================
 
 def ask_claude(client, question, system_prompt, chat_history):
-    """Send the question and data to Claude and get an answer."""
     messages = []
     for msg in chat_history:
         messages.append({"role": msg["role"], "content": msg["content"]})
@@ -343,44 +466,60 @@ def ask_claude(client, question, system_prompt, chat_history):
 
 
 # ============================================================
-# MAIN APP
+# LANDING PAGE
 # ============================================================
 
-def main():
-    # Load credentials
-    config = load_credentials()
+def show_landing_page():
+    show_logo(max_width_px=340)
 
-    # Check password before showing anything
-    if not check_password(config["app_password"]):
-        st.stop()
+    st.markdown('<div class="landing-question">Which bot do you need to talk to?</div>', unsafe_allow_html=True)
+    st.markdown('<div class="landing-subtitle">Choose a bot below to get started.</div>', unsafe_allow_html=True)
 
-    # Determine which bot(s) to show based on BOT_MODE setting
-    deploy_mode = config["bot_mode"]
-    if deploy_mode == "bob_only":
-        bot_mode = "📊 Book of Business Bot"
-        show_toggle = False
-    elif deploy_mode == "process_only":
-        bot_mode = "📋 Process Bot"
-        show_toggle = False
-    else:
-        bot_mode = None  # Will be set by toggle below
-        show_toggle = True
+    col_left, col_bob, col_gap, col_process, col_right = st.columns([1, 3, 0.4, 3, 1])
 
-    # Sidebar - Bot Selection (only if both bots are enabled)
+    with col_bob:
+        if st.button("📊  BoB Bot\n\nBook of Business", key="goto_bob", use_container_width=True):
+            st.session_state["view"] = "bob"
+            st.rerun()
+        st.markdown(
+            '<div style="text-align:center; color:#b8d4e3; font-size:0.9rem; margin-top:0.75rem;">'
+            'Accounts, MRR, integrations, renewals'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+    with col_process:
+        if st.button("📋  Process Bot\n\nCompany Processes", key="goto_process", use_container_width=True):
+            st.session_state["view"] = "process"
+            st.rerun()
+        st.markdown(
+            '<div style="text-align:center; color:#b8d4e3; font-size:0.9rem; margin-top:0.75rem;">'
+            'Procedures, guidelines, how-tos'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+
+# ============================================================
+# BOT VIEW (shared logic for BoB + Process)
+# ============================================================
+
+def show_bot_view(bot_mode, config):
+    # Sidebar
     with st.sidebar:
-        if show_toggle:
-            st.markdown("### 🤖 Choose Your Bot")
-            bot_mode = st.radio(
-                "Which bot do you want to talk to?",
-                ["📊 Book of Business Bot", "📋 Process Bot"],
-                index=0,
-                label_visibility="collapsed"
-            )
-            st.markdown("---")
+        show_logo(max_width_px=180)
 
+        if st.button("← Back to Home", key="back_home", use_container_width=True):
+            st.session_state["view"] = "landing"
+            st.rerun()
+
+        st.markdown("---")
         st.markdown("### 📡 Connection Status")
 
-        if bot_mode == "📊 Book of Business Bot":
+        data = None
+        documents = None
+
+        if bot_mode == "bob":
             try:
                 data = load_sheet_data(config["google_credentials"], config["google_sheet_id"])
                 st.markdown(f'<span class="status-connected">✅ Connected to Google Sheet</span>', unsafe_allow_html=True)
@@ -418,14 +557,13 @@ def main():
                 st.error(f"Error: {e}")
                 st.stop()
 
-        # Refresh button
         st.markdown("---")
         if st.button("🔄 Refresh Data", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
 
         st.markdown("---")
-        if bot_mode == "📊 Book of Business Bot":
+        if bot_mode == "bob":
             st.markdown("### 💡 Example Questions")
             st.markdown("""
 - Which accounts have Bullhorn integrated?
@@ -446,15 +584,15 @@ def main():
 - How do I submit a feature request?
             """)
 
-    # Header changes based on bot mode
-    if bot_mode == "📊 Book of Business Bot":
-        st.markdown('<div class="main-header">📊 Ringover Book of Business Bot</div>', unsafe_allow_html=True)
+    # Main area header
+    if bot_mode == "bob":
+        st.markdown('<div class="main-header">📊 Book of Business Bot</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub-header">Ask me anything about the US Book of Business — accounts, MRR, integrations, renewals, and more.</div>', unsafe_allow_html=True)
     else:
-        st.markdown('<div class="main-header">📋 Ringover Process Bot</div>', unsafe_allow_html=True)
+        st.markdown('<div class="main-header">📋 Process Bot</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub-header">Ask me anything about Ringover processes, procedures, and guidelines.</div>', unsafe_allow_html=True)
 
-    # Use separate chat histories for each bot
+    # Chat history
     bob_key = "bob_messages"
     process_key = "process_messages"
 
@@ -463,15 +601,13 @@ def main():
     if process_key not in st.session_state:
         st.session_state[process_key] = []
 
-    current_key = bob_key if bot_mode == "📊 Book of Business Bot" else process_key
+    current_key = bob_key if bot_mode == "bob" else process_key
 
-    # Display chat history
     for message in st.session_state[current_key]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    # Chat input
-    placeholder = "Ask me about the Book of Business..." if bot_mode == "📊 Book of Business Bot" else "Ask me about a process or procedure..."
+    placeholder = "Ask me about the Book of Business..." if bot_mode == "bob" else "Ask me about a process or procedure..."
 
     if prompt := st.chat_input(placeholder):
         with st.chat_message("user"):
@@ -479,11 +615,11 @@ def main():
         st.session_state[current_key].append({"role": "user", "content": prompt})
 
         with st.chat_message("assistant"):
-            with st.spinner("Looking through the data..." if bot_mode == "📊 Book of Business Bot" else "Searching the documents..."):
+            with st.spinner("Looking through the data..." if bot_mode == "bob" else "Searching the documents..."):
                 try:
                     claude_client = anthropic.Anthropic(api_key=config["anthropic_api_key"])
 
-                    if bot_mode == "📊 Book of Business Bot":
+                    if bot_mode == "bob":
                         data_summary = data_to_summary(data)
                         system = BOB_SYSTEM_PROMPT.format(data=data_summary)
                     else:
@@ -502,6 +638,33 @@ def main():
                     st.error("Your Anthropic API key is invalid. Please check your secrets.")
                 except Exception as e:
                     st.error(f"Something went wrong: {e}")
+
+
+# ============================================================
+# MAIN APP
+# ============================================================
+
+def main():
+    config = load_credentials()
+
+    if not check_password(config["app_password"]):
+        st.stop()
+
+    # Track which view we're on
+    if "view" not in st.session_state:
+        st.session_state["view"] = "landing"
+
+    view = st.session_state["view"]
+
+    if view == "landing":
+        show_landing_page()
+    elif view == "bob":
+        show_bot_view("bob", config)
+    elif view == "process":
+        show_bot_view("process", config)
+    else:
+        st.session_state["view"] = "landing"
+        st.rerun()
 
 
 if __name__ == "__main__":
