@@ -57,11 +57,39 @@ def load_credentials():
             "google_drive_folder_id": st.secrets["secrets"].get("GOOGLE_DRIVE_FOLDER_ID", ""),
             "google_credentials": json.loads(st.secrets["secrets"]["GOOGLE_CREDENTIALS_JSON"]),
             "bot_mode": bot_mode,
+            "app_password": st.secrets["secrets"].get("APP_PASSWORD", ""),
         }
         return config
     except Exception as e:
         st.error(f"Could not load credentials. Make sure your secrets are set up correctly. Error: {e}")
         st.stop()
+
+
+# --- Password Protection ---
+def check_password(expected_password):
+    """Returns True if user has entered the correct password."""
+    # If no password is configured, skip the gate
+    if not expected_password:
+        return True
+
+    # If already authenticated in this session, allow through
+    if st.session_state.get("authenticated", False):
+        return True
+
+    # Show password prompt
+    st.markdown('<div class="main-header">🔒 Ringover Bots</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sub-header">Please enter the access password to continue.</div>', unsafe_allow_html=True)
+
+    password = st.text_input("Password", type="password", key="password_input")
+
+    if password:
+        if password == expected_password:
+            st.session_state["authenticated"] = True
+            st.rerun()
+        else:
+            st.error("❌ Incorrect password. Please try again.")
+
+    return False
 
 
 # --- Google Auth Helper ---
@@ -321,6 +349,10 @@ def ask_claude(client, question, system_prompt, chat_history):
 def main():
     # Load credentials
     config = load_credentials()
+
+    # Check password before showing anything
+    if not check_password(config["app_password"]):
+        st.stop()
 
     # Determine which bot(s) to show based on BOT_MODE setting
     deploy_mode = config["bot_mode"]
