@@ -4,11 +4,13 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import anthropic
+import pandas as pd
 import json
 import csv
 import io
 import base64
 import os
+import re
 
 # ============================================================
 # RINGOVER BOTS
@@ -303,7 +305,15 @@ def load_credentials():
     try:
         config = {
             "anthropic_api_key": st.secrets["secrets"]["ANTHROPIC_API_KEY"],
+            # US Book of Business
             "google_sheet_id": st.secrets["secrets"].get("GOOGLE_SHEET_ID", ""),
+            "google_sheet_gid": str(st.secrets["secrets"].get("GOOGLE_SHEET_GID", "")).strip(),
+            "google_sheet_tab_name": st.secrets["secrets"].get("GOOGLE_SHEET_TAB_NAME", "").strip(),
+            # UK Book of Business
+            "uk_google_sheet_id": st.secrets["secrets"].get("UK_GOOGLE_SHEET_ID", ""),
+            "uk_google_sheet_gid": str(st.secrets["secrets"].get("UK_GOOGLE_SHEET_GID", "")).strip(),
+            "uk_google_sheet_tab_name": st.secrets["secrets"].get("UK_GOOGLE_SHEET_TAB_NAME", "").strip(),
+            # Shared
             "google_drive_folder_id": st.secrets["secrets"].get("GOOGLE_DRIVE_FOLDER_ID", ""),
             "google_credentials": json.loads(st.secrets["secrets"]["GOOGLE_CREDENTIALS_JSON"]),
             "app_password": st.secrets["secrets"].get("APP_PASSWORD", ""),
@@ -354,58 +364,202 @@ def get_google_creds(credentials_info):
 # ============================================================
 
 @st.cache_data(ttl=300)
-def load_sheet_data(_credentials, sheet_id):
+def load_sheet_data(_credentials, sheet_id, sheet_gid="", sheet_tab_name=""):
+    """
+    Loads rows from a specific tab of the Google Sheet.
+
+    Priority:
+      1. sheet_gid    (numeric tab id from the URL, e.g. gid=1485115496)
+      2. sheet_tab_name (human-readable tab name)
+      3. first tab (fallback, for backward compatibility)
+    """
     creds = get_google_creds(_credentials)
     client = gspread.authorize(creds)
     spreadsheet = client.open_by_key(sheet_id)
-    worksheet = spreadsheet.sheet1
+
+    worksheet = None
+    if sheet_gid:
+        try:
+            gid_int = int(sheet_gid)
+            for ws in spreadsheet.worksheets():
+                if ws.id == gid_int:
+                    worksheet = ws
+                    break
+        except (ValueError, TypeError):
+            pass
+
+    if worksheet is None and sheet_tab_name:
+        try:
+            worksheet = spreadsheet.worksheet(sheet_tab_name)
+        except Exception:
+            worksheet = None
+
+    if worksheet is None:
+        worksheet = spreadsheet.sheet1
+
     data = worksheet.get_all_records()
-    return data
+    return data, worksheet.title, [w.title for w in spreadsheet.worksheets()]
 
 
-def data_to_summary(data):
+def data_to_dataframe(data):
+    """Convert the sheet rows into a pandas DataFrame with numeric columns normalized."""
     if not data:
-        return "No data found in the spreadsheet."
+        return pd.DataFrame()
 
-    columns = list(data[0].keys())
-    total_rows = len(data)
+    df = pd.DataFrame(data)
 
-    summary = f"This Google Sheet contains {total_rows} accounts with the following columns:\n"
-    summary += ", ".join(columns) + "\n\n"
+    # Try to coerce columns that look like currency/numbers to float.
+    # A column is numeric-looking if > 70% of non-blank values match a currency/number pattern.
+    number_pattern = re.compile(r"^-?\$?\s*-?[\d,]+(\.\d+)?%?$")
+    for col in df.columns:
+        if df[col].dtype != object:
+            continue
+        non_blank = df[col].astype(str).str.strip()
+        non_blank = non_blank[non_blank != ""]
+        if len(non_blank) == 0:
+            continue
+        matches = non_blank.apply(lambda v: bool(number_pattern.match(str(v).strip())))
+        if matches.mean() > 0.7:
+            cleaned = (
+                df[col]
+                .astype(str)
+                .str.replace("$", "", regex=False)
+                .str.replace(",", "", regex=False)
+                .str.replace("%", "", regex=False)
+                .str.strip()
+                .replace("", None)
+            )
+            try:
+                df[col] = pd.to_numeric(cleaned, errors="coerce")
+            except Exception:
+                pass
 
-    output = io.StringIO()
-    writer = csv.DictWriter(output, fieldnames=columns)
-    writer.writeheader()
-    for row in data:
-        writer.writerow(row)
-    csv_text = output.getvalue()
+    return df
 
-    summary += "Here is the complete data:\n\n"
-    summary += csv_text
 
-    return summary
+def dataframe_to_schema(df):
+    """Return a string describing the DataFrame columns, types, and sample values for Claude."""
+    if df.empty:
+        return "The DataFrame is empty."
+
+    lines = [
+        f"DataFrame name: df",
+        f"Total rows: {len(df)}",
+        f"Total columns: {len(df.columns)}",
+        "",
+        "Columns (name | dtype | non-null count | sample values):",
+    ]
+    for col in df.columns:
+        dtype = str(df[col].dtype)
+        non_null = int(df[col].notna().sum())
+        sample = df[col].dropna().astype(str).head(4).tolist()
+        sample_str = ", ".join(f'"{s}"' for s in sample)
+        lines.append(f'  - "{col}" | {dtype} | {non_null} non-null | samples: [{sample_str}]')
+
+    return "\n".join(lines)
 
 
 BOB_SYSTEM_PROMPT = """You are the Ringover Book of Business Bot — a helpful assistant for the Ringover US team.
-You have access to the complete US Book of Business data from a live Google Sheet.
 
-Your job is to answer questions about the accounts, provide lists, pull reports, and help the team
-find information quickly without having to search through the spreadsheet manually.
+You have access to a pandas DataFrame named `df` that holds the complete US Book of Business data
+(roughly {row_count} rows). You must use the `query_dataframe` tool to compute ANY answer that involves:
+- counts, sums, averages, or other aggregations
+- filters across the data (e.g., "accounts where X and Y")
+- sorting or ranking (e.g., "top N by MRR")
+- looking up specific accounts or values
 
-IMPORTANT RULES:
-- Always base your answers on the actual data provided below. Never make up information.
-- When listing accounts, format them clearly and include relevant details.
-- When asked for counts or totals, be precise.
-- If you are not sure about something, say so rather than guessing.
-- When asked about MRR, licenses, or financial data, be exact with the numbers.
-- If someone asks a question the data cannot answer, let them know what IS available.
-- Be conversational and helpful. These are your colleagues.
-- When providing lists, include enough context to be useful (e.g., Team Name, MRR, CSM, etc.)
-- If the data has blank or empty values for a field, mention that the field is empty for those accounts.
+NEVER try to answer such questions from memory or by reading sample values — always run a query first.
+You may run MULTIPLE queries if you need intermediate results.
 
-HERE IS THE CURRENT DATA FROM THE GOOGLE SHEET:
-{data}
+COLUMN NAMES ARE CASE-SENSITIVE and must be quoted exactly as they appear in the schema below.
+If a user's wording doesn't exactly match a column name, pick the column whose name is the closest
+semantic match (for example, "Account Director" might be a value inside a column like "Upsell Owner"
+or "Owner Type" — scan the samples to find the right fit, and run a small exploratory query if unsure).
+
+When comparing text values, be mindful of whitespace and case. You may use `.str.strip()` and
+`.str.lower()` for fuzzier matching when appropriate.
+
+When presenting results to the user:
+- Lead with the direct answer (e.g., "There are 324 accounts matching that criteria.")
+- When listing accounts, show 10–20 by default and offer to expand if the list is longer
+- Include relevant context columns (account name, MRR, CSM, etc.)
+- Format money, counts, and percentages clearly
+- If a query returns zero rows, say so plainly and suggest how the question might be rephrased
+- Always cite the exact numbers from query results — never round or estimate
+
+DataFrame schema:
+{schema}
 """
+
+
+QUERY_TOOL = {
+    "name": "query_dataframe",
+    "description": (
+        "Evaluate a Python expression against the Book of Business pandas DataFrame. "
+        "The DataFrame is available as `df`. `pd` (pandas) is also available. "
+        "Use this for ALL counts, filters, sums, sorts, and lookups. "
+        "Return value is converted to a readable string or JSON and sent back to you. "
+        "Examples of valid expressions:\n"
+        "  - len(df)\n"
+        "  - df['Total MRR'].sum()\n"
+        "  - len(df[(df['Upsell Owner'] == 'Account Director') & (df['Empower MRR'] == 0)])\n"
+        "  - df.nlargest(20, 'Total MRR')[['Account Name', 'Total MRR', 'CSM']].to_dict('records')\n"
+        "  - df['CSM'].value_counts().to_dict()\n"
+        "  - df[df['Account Name'].str.contains('Acme', case=False, na=False)].to_dict('records')"
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "expression": {
+                "type": "string",
+                "description": (
+                    "A single Python expression to evaluate. The DataFrame is `df` and pandas is `pd`. "
+                    "Do NOT use statements (no assignments, no imports, no print). Just an expression."
+                ),
+            }
+        },
+        "required": ["expression"],
+    },
+}
+
+
+def run_pandas_query(df, expression):
+    """Safely evaluate a pandas expression and return a string result."""
+    try:
+        # Restricted eval — only df, pd, and a small set of safe builtins
+        safe_builtins = {
+            "len": len, "sum": sum, "min": min, "max": max, "sorted": sorted,
+            "round": round, "abs": abs, "int": int, "float": float, "str": str,
+            "list": list, "dict": dict, "set": set, "tuple": tuple, "bool": bool,
+            "range": range, "enumerate": enumerate, "zip": zip, "any": any, "all": all,
+        }
+        result = eval(expression, {"__builtins__": safe_builtins}, {"df": df, "pd": pd})
+    except Exception as e:
+        return f"ERROR running expression `{expression}`: {type(e).__name__}: {e}"
+
+    # Serialize the result so Claude can read it
+    try:
+        if isinstance(result, pd.DataFrame):
+            # Limit row count in output to avoid blowing context
+            if len(result) > 50:
+                head = result.head(50).to_dict("records")
+                return json.dumps({"total_rows": len(result), "showing_first_50": head}, default=str)
+            return json.dumps(result.to_dict("records"), default=str)
+        elif isinstance(result, pd.Series):
+            if len(result) > 100:
+                head = result.head(100).to_dict()
+                return json.dumps({"total_items": len(result), "showing_first_100": head}, default=str)
+            return json.dumps(result.to_dict(), default=str)
+        elif isinstance(result, (int, float, str, bool)) or result is None:
+            return json.dumps(result, default=str)
+        elif isinstance(result, (list, dict, tuple, set)):
+            if isinstance(result, set):
+                result = list(result)
+            return json.dumps(result, default=str)
+        else:
+            return str(result)
+    except Exception as e:
+        return f"Result computed but could not be serialized: {type(e).__name__}: {e}. repr: {repr(result)[:500]}"
 
 
 # ============================================================
@@ -548,6 +702,7 @@ HERE ARE THE CURRENT PROCESS DOCUMENTS:
 # ============================================================
 
 def ask_claude(client, question, system_prompt, chat_history):
+    """Simple Claude call without tools — used by Process Bot."""
     messages = []
     for msg in chat_history:
         messages.append({"role": msg["role"], "content": msg["content"]})
@@ -563,6 +718,54 @@ def ask_claude(client, question, system_prompt, chat_history):
     return response.content[0].text
 
 
+def ask_claude_with_dataframe(client, question, system_prompt, chat_history, df, max_iterations=8):
+    """Claude call with access to query_dataframe tool — used by Book of Business Bot."""
+    # Rebuild message history as plain text messages (tool traffic is not persisted across turns)
+    messages = []
+    for msg in chat_history:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": question})
+
+    for _ in range(max_iterations):
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            system=system_prompt,
+            tools=[QUERY_TOOL],
+            messages=messages,
+        )
+
+        if response.stop_reason == "tool_use":
+            # Append assistant's tool-call message
+            messages.append({"role": "assistant", "content": response.content})
+
+            # Run every tool call in this turn and append results
+            tool_results = []
+            for block in response.content:
+                if getattr(block, "type", None) == "tool_use" and block.name == "query_dataframe":
+                    expression = block.input.get("expression", "")
+                    result_text = run_pandas_query(df, expression)
+                    # Truncate very long results to keep context manageable
+                    if len(result_text) > 20000:
+                        result_text = result_text[:20000] + "\n... [truncated]"
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result_text,
+                    })
+            messages.append({"role": "user", "content": tool_results})
+            continue
+
+        # Final response — pull out any text blocks
+        final_text = ""
+        for block in response.content:
+            if getattr(block, "type", None) == "text":
+                final_text += block.text
+        return final_text if final_text.strip() else "I couldn't produce an answer. Try rephrasing the question."
+
+    return "I ran too many queries without reaching a final answer. Try simplifying the question or breaking it into parts."
+
+
 # ============================================================
 # LANDING PAGE
 # ============================================================
@@ -573,21 +776,32 @@ def show_landing_page():
     st.markdown('<div class="landing-question">Which bot do you need to talk to?</div>', unsafe_allow_html=True)
     st.markdown('<div class="landing-subtitle">Choose a bot below to get started.</div>', unsafe_allow_html=True)
 
-    col_left, col_bob, col_gap, col_process, col_right = st.columns([1, 3, 0.4, 3, 1])
+    col_left, col_us, col_gap1, col_uk, col_gap2, col_process, col_right = st.columns([0.5, 3, 0.3, 3, 0.3, 3, 0.5])
 
-    with col_bob:
-        if st.button("📊  BoB Bot\n\nBook of Business", key="goto_bob", use_container_width=True):
+    with col_us:
+        if st.button("🇺🇸  USA BoB Bot\n\nUS Book of Business", key="goto_bob", use_container_width=True):
             st.session_state["view"] = "bob"
             st.rerun()
         st.markdown(
             '<div style="text-align:center; color:#b8d4e3; font-size:0.9rem; margin-top:0.75rem;">'
-            'Accounts, MRR, integrations, renewals'
+            'US accounts, MRR, integrations, renewals'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+    with col_uk:
+        if st.button("🇬🇧  UK BoB Bot\n\nUK Book of Business", key="goto_uk_bob", use_container_width=True):
+            st.session_state["view"] = "uk_bob"
+            st.rerun()
+        st.markdown(
+            '<div style="text-align:center; color:#b8d4e3; font-size:0.9rem; margin-top:0.75rem;">'
+            'UK accounts, MRR, integrations, renewals'
             '</div>',
             unsafe_allow_html=True,
         )
 
     with col_process:
-        if st.button("📋  Process Bot\n\nCompany Processes", key="goto_process", use_container_width=True):
+        if st.button("🇺🇸  Process Bot\n\nCompany Processes", key="goto_process", use_container_width=True):
             st.session_state["view"] = "process"
             st.rerun()
         st.markdown(
@@ -616,29 +830,45 @@ def show_bot_view(bot_mode, config):
 
         data = None
         documents = None
+        df = None
 
-        if bot_mode == "bob":
+        if bot_mode in ("bob", "uk_bob"):
+            # Pick the right sheet credentials based on region
+            if bot_mode == "uk_bob":
+                sheet_id = config.get("uk_google_sheet_id", "")
+                sheet_gid = config.get("uk_google_sheet_gid", "")
+                sheet_tab = config.get("uk_google_sheet_tab_name", "")
+                currency_symbol = "£"
+                region_label = "UK"
+            else:
+                sheet_id = config.get("google_sheet_id", "")
+                sheet_gid = config.get("google_sheet_gid", "")
+                sheet_tab = config.get("google_sheet_tab_name", "")
+                currency_symbol = "$"
+                region_label = "US"
+
             try:
-                data = load_sheet_data(config["google_credentials"], config["google_sheet_id"])
-                st.markdown(f'<span class="status-connected">✅ Connected to Google Sheet</span>', unsafe_allow_html=True)
-                st.markdown(f"**Accounts loaded:** {len(data)}")
+                data, loaded_tab, all_tabs = load_sheet_data(
+                    config["google_credentials"],
+                    sheet_id,
+                    sheet_gid,
+                    sheet_tab,
+                )
+                df = data_to_dataframe(data)
+                st.markdown(f'<span class="status-connected">✅ Connected to {region_label} Google Sheet</span>', unsafe_allow_html=True)
+                st.markdown(f"**Active tab:** {loaded_tab}")
+                if len(all_tabs) > 1:
+                    st.caption(f"All tabs in this sheet: {', '.join(all_tabs)}")
+                st.markdown(f"**Accounts loaded:** {len(df)}")
+                st.markdown(f"**Data columns:** {len(df.columns)}")
 
-                if data:
-                    columns = list(data[0].keys())
-                    st.markdown(f"**Data columns:** {len(columns)}")
-                    mrr_values = [row.get("Total MRR", 0) for row in data if row.get("Total MRR")]
-                    if mrr_values:
-                        numeric_mrr = []
-                        for v in mrr_values:
-                            try:
-                                numeric_mrr.append(float(str(v).replace("$", "").replace(",", "")))
-                            except (ValueError, TypeError):
-                                pass
-                        if numeric_mrr:
-                            total_mrr = sum(numeric_mrr)
-                            st.markdown(f"**Total MRR:** ${total_mrr:,.2f}")
+                # Auto-detect a Total MRR-ish column for the summary widget
+                mrr_col = next((c for c in df.columns if "total mrr" in c.lower()), None)
+                if mrr_col and pd.api.types.is_numeric_dtype(df[mrr_col]):
+                    total_mrr = df[mrr_col].sum()
+                    st.markdown(f"**Total MRR:** {currency_symbol}{total_mrr:,.2f}")
             except Exception as e:
-                st.markdown(f'<span class="status-error">❌ Could not connect to Google Sheet</span>', unsafe_allow_html=True)
+                st.markdown(f'<span class="status-error">❌ Could not connect to {region_label} Google Sheet</span>', unsafe_allow_html=True)
                 st.error(f"Error: {e}")
                 st.stop()
         else:
@@ -672,6 +902,17 @@ def show_bot_view(bot_mode, config):
 - What is the total MRR by business unit?
 - Show me all accounts with Empower licenses
             """)
+        elif bot_mode == "uk_bob":
+            st.markdown("### 💡 Example Questions")
+            st.markdown("""
+- Who are the top 10 UK accounts by MRR?
+- Which UK accounts have an ATS/CRM integrated?
+- List all UK accounts up for renewal
+- What is the total UK MRR?
+- Which accounts have Empower licences?
+- Show me all accounts with whitespace opportunities
+- How many accounts does each team manage?
+            """)
         else:
             st.markdown("### 💡 Example Questions")
             st.markdown("""
@@ -684,28 +925,44 @@ def show_bot_view(bot_mode, config):
 
     # Main area header
     if bot_mode == "bob":
-        st.markdown('<div class="main-header">📊 Book of Business Bot</div>', unsafe_allow_html=True)
+        st.markdown('<div class="main-header">🇺🇸 USA Book of Business Bot</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub-header">Ask me anything about the US Book of Business — accounts, MRR, integrations, renewals, and more.</div>', unsafe_allow_html=True)
+    elif bot_mode == "uk_bob":
+        st.markdown('<div class="main-header">🇬🇧 UK Book of Business Bot</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub-header">Ask me anything about the UK Book of Business — accounts, MRR, integrations, renewals, and more.</div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="main-header">📋 Process Bot</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub-header">Ask me anything about Ringover processes, procedures, and guidelines.</div>', unsafe_allow_html=True)
 
     # Chat history
     bob_key = "bob_messages"
+    uk_bob_key = "uk_bob_messages"
     process_key = "process_messages"
 
     if bob_key not in st.session_state:
         st.session_state[bob_key] = []
+    if uk_bob_key not in st.session_state:
+        st.session_state[uk_bob_key] = []
     if process_key not in st.session_state:
         st.session_state[process_key] = []
 
-    current_key = bob_key if bot_mode == "bob" else process_key
+    if bot_mode == "bob":
+        current_key = bob_key
+    elif bot_mode == "uk_bob":
+        current_key = uk_bob_key
+    else:
+        current_key = process_key
 
     for message in st.session_state[current_key]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
 
-    placeholder = "Ask me about the Book of Business..." if bot_mode == "bob" else "Ask me about a process or procedure..."
+    if bot_mode == "bob":
+        placeholder = "Ask me about the US Book of Business..."
+    elif bot_mode == "uk_bob":
+        placeholder = "Ask me about the UK Book of Business..."
+    else:
+        placeholder = "Ask me about a process or procedure..."
 
     if prompt := st.chat_input(placeholder):
         with st.chat_message("user"):
@@ -713,23 +970,33 @@ def show_bot_view(bot_mode, config):
         st.session_state[current_key].append({"role": "user", "content": prompt})
 
         with st.chat_message("assistant"):
-            with st.spinner("Looking through the data..." if bot_mode == "bob" else "Searching the documents..."):
+            with st.spinner("Querying the data..." if bot_mode in ("bob", "uk_bob") else "Searching the documents..."):
                 try:
                     claude_client = anthropic.Anthropic(api_key=config["anthropic_api_key"])
 
-                    if bot_mode == "bob":
-                        data_summary = data_to_summary(data)
-                        system = BOB_SYSTEM_PROMPT.format(data=data_summary)
+                    if bot_mode in ("bob", "uk_bob"):
+                        schema = dataframe_to_schema(df)
+                        if bot_mode == "uk_bob":
+                            system = BOB_SYSTEM_PROMPT.replace("US team", "UK team").replace("US Book of Business", "UK Book of Business").format(row_count=len(df), schema=schema)
+                        else:
+                            system = BOB_SYSTEM_PROMPT.format(row_count=len(df), schema=schema)
+                        response = ask_claude_with_dataframe(
+                            claude_client,
+                            prompt,
+                            system,
+                            st.session_state[current_key][:-1],
+                            df,
+                        )
                     else:
                         doc_summary = documents_to_summary(documents)
                         system = PROCESS_SYSTEM_PROMPT.format(data=doc_summary)
+                        response = ask_claude(
+                            claude_client,
+                            prompt,
+                            system,
+                            st.session_state[current_key][:-1],
+                        )
 
-                    response = ask_claude(
-                        claude_client,
-                        prompt,
-                        system,
-                        st.session_state[current_key][:-1],
-                    )
                     st.markdown(response)
                     st.session_state[current_key].append({"role": "assistant", "content": response})
                 except anthropic.AuthenticationError:
@@ -758,6 +1025,8 @@ def main():
         show_landing_page()
     elif view == "bob":
         show_bot_view("bob", config)
+    elif view == "uk_bob":
+        show_bot_view("uk_bob", config)
     elif view == "process":
         show_bot_view("process", config)
     else:
