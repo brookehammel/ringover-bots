@@ -275,15 +275,17 @@ st.markdown(f"""
         visibility: visible !important;
     }}
     
-    /* Make sidebar toggle arrows white so they are visible */
-    [data-testid="collapsedControl"] svg,
-    [data-testid="collapsedControl"] path,
-    [data-testid="stSidebarCollapseButton"] svg,
-    [data-testid="stSidebarCollapseButton"] path,
-    button[kind="headerNoPadding"] svg,
-    button[kind="headerNoPadding"] path,
-    button[kind="header"] svg,
-    button[kind="header"] path {{
+    /* Force arrows to be white even if Streamlit is in Light/System mode */
+    html body [data-testid="collapsedControl"] svg,
+    html body [data-testid="collapsedControl"] path,
+    html body [data-testid="stSidebarCollapseButton"] svg,
+    html body [data-testid="stSidebarCollapseButton"] path,
+    html body button[kind="headerNoPadding"] svg,
+    html body button[kind="headerNoPadding"] path,
+    html body button[kind="header"] svg,
+    html body button[kind="header"] path,
+    html body header svg,
+    html body header path {{
         fill: #ffffff !important;
         color: #ffffff !important;
         stroke: #ffffff !important;
