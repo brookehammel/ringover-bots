@@ -773,13 +773,31 @@ def ask_claude_with_dataframe(client, question, system_prompt, chat_history, df,
 def show_landing_page():
     show_logo(max_width_px=340)
 
-    st.markdown('<div class="landing-question">Which bot do you need to talk to?</div>', unsafe_allow_html=True)
+    st.markdown('<div class="landing-question">SELECT YOUR BOT BELOW</div>', unsafe_allow_html=True)
     st.markdown('<div class="landing-subtitle">Choose a bot below to get started.</div>', unsafe_allow_html=True)
 
     col_left, col_us, col_gap1, col_uk, col_gap2, col_process, col_right = st.columns([0.5, 3, 0.3, 3, 0.3, 3, 0.5])
 
+    # Load flag images as base64 (same approach as the Ringover logo)
+    flag_dir = os.path.dirname(__file__)
+    def _load_flag_b64(filename):
+        fpath = os.path.join(flag_dir, filename)
+        if os.path.exists(fpath):
+            with open(fpath, "rb") as f:
+                return base64.b64encode(f.read()).decode("utf-8")
+        return None
+
+    us_flag_b64 = _load_flag_b64("flag_us.png")
+    gb_flag_b64 = _load_flag_b64("flag_gb.png")
+
+    def _flag_html(b64):
+        if b64:
+            return f'<div style="text-align:center; margin-bottom:0.5rem;"><img src="data:image/png;base64,{b64}" style="width:56px; border-radius:4px;" /></div>'
+        return ""
+
     with col_us:
-        if st.button("🇺🇸  USA BoB Bot\n\nUS Book of Business", key="goto_bob", use_container_width=True):
+        st.markdown(_flag_html(us_flag_b64), unsafe_allow_html=True)
+        if st.button("USA BoB Bot\n\nUS Book of Business", key="goto_bob", use_container_width=True):
             st.session_state["view"] = "bob"
             st.rerun()
         st.markdown(
@@ -790,7 +808,8 @@ def show_landing_page():
         )
 
     with col_uk:
-        if st.button("🇬🇧  UK BoB Bot\n\nUK Book of Business", key="goto_uk_bob", use_container_width=True):
+        st.markdown(_flag_html(gb_flag_b64), unsafe_allow_html=True)
+        if st.button("UK BoB Bot\n\nUK Book of Business", key="goto_uk_bob", use_container_width=True):
             st.session_state["view"] = "uk_bob"
             st.rerun()
         st.markdown(
@@ -801,7 +820,8 @@ def show_landing_page():
         )
 
     with col_process:
-        if st.button("🇺🇸  Process Bot\n\nCompany Processes", key="goto_process", use_container_width=True):
+        st.markdown(_flag_html(us_flag_b64), unsafe_allow_html=True)
+        if st.button("Process Bot\n\nCompany Processes", key="goto_process", use_container_width=True):
             st.session_state["view"] = "process"
             st.rerun()
         st.markdown(
@@ -925,10 +945,10 @@ def show_bot_view(bot_mode, config):
 
     # Main area header
     if bot_mode == "bob":
-        st.markdown('<div class="main-header">🇺🇸 USA Book of Business Bot</div>', unsafe_allow_html=True)
+        st.markdown('<div class="main-header">USA Book of Business Bot</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub-header">Ask me anything about the US Book of Business — accounts, MRR, integrations, renewals, and more.</div>', unsafe_allow_html=True)
     elif bot_mode == "uk_bob":
-        st.markdown('<div class="main-header">🇬🇧 UK Book of Business Bot</div>', unsafe_allow_html=True)
+        st.markdown('<div class="main-header">UK Book of Business Bot</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub-header">Ask me anything about the UK Book of Business — accounts, MRR, integrations, renewals, and more.</div>', unsafe_allow_html=True)
     else:
         st.markdown('<div class="main-header">📋 Process Bot</div>', unsafe_allow_html=True)
