@@ -278,11 +278,11 @@ st.markdown(f"""
    /* The Nuclear Option: Force ALL icons in the header and sidebar controls to be white */
     html body [data-testid="stHeader"] button *,
     html body [data-testid="collapsedControl"] *,
-    html body [data-testid="stSidebarCollapseButton"] * {
+    html body [data-testid="stSidebarCollapseButton"] * {{
         fill: #ffffff !important;
         color: #ffffff !important;
         stroke: #ffffff !important;
-    }
+    }}
 </style>
 """, unsafe_allow_html=True)
 
