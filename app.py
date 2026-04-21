@@ -21,7 +21,8 @@ import re
 st.set_page_config(
     page_title="Ringover Bots",
     page_icon="🤖",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 # --- Ringover Brand Colors ---
@@ -837,7 +838,50 @@ def show_landing_page():
 # ============================================================
 
 def show_bot_view(bot_mode, config):
-    # Sidebar
+    # --- Load data BEFORE rendering sidebar so we know what to display ---
+    data = None
+    documents = None
+    df = None
+    connection_ok = False
+    connection_error = None
+
+    if bot_mode in ("bob", "uk_bob"):
+        if bot_mode == "uk_bob":
+            sheet_id = config.get("uk_google_sheet_id", "")
+            sheet_gid = config.get("uk_google_sheet_gid", "")
+            sheet_tab = config.get("uk_google_sheet_tab_name", "")
+            currency_symbol = "£"
+            region_label = "UK"
+        else:
+            sheet_id = config.get("google_sheet_id", "")
+            sheet_gid = config.get("google_sheet_gid", "")
+            sheet_tab = config.get("google_sheet_tab_name", "")
+            currency_symbol = "$"
+            region_label = "US"
+
+        try:
+            data, loaded_tab, all_tabs = load_sheet_data(
+                config["google_credentials"],
+                sheet_id,
+                sheet_gid,
+                sheet_tab,
+            )
+            df = data_to_dataframe(data)
+            connection_ok = True
+        except Exception as e:
+            connection_error = str(e)
+    else:
+        region_label = ""
+        currency_symbol = ""
+        loaded_tab = ""
+        all_tabs = []
+        try:
+            documents = load_drive_documents(config["google_credentials"], config["google_drive_folder_id"])
+            connection_ok = True
+        except Exception as e:
+            connection_error = str(e)
+
+    # --- Sidebar (always renders regardless of connection status) ---
     with st.sidebar:
         show_logo(max_width_px=180)
 
@@ -848,33 +892,8 @@ def show_bot_view(bot_mode, config):
         st.markdown("---")
         st.markdown("### 📡 Connection Status")
 
-        data = None
-        documents = None
-        df = None
-
         if bot_mode in ("bob", "uk_bob"):
-            # Pick the right sheet credentials based on region
-            if bot_mode == "uk_bob":
-                sheet_id = config.get("uk_google_sheet_id", "")
-                sheet_gid = config.get("uk_google_sheet_gid", "")
-                sheet_tab = config.get("uk_google_sheet_tab_name", "")
-                currency_symbol = "£"
-                region_label = "UK"
-            else:
-                sheet_id = config.get("google_sheet_id", "")
-                sheet_gid = config.get("google_sheet_gid", "")
-                sheet_tab = config.get("google_sheet_tab_name", "")
-                currency_symbol = "$"
-                region_label = "US"
-
-            try:
-                data, loaded_tab, all_tabs = load_sheet_data(
-                    config["google_credentials"],
-                    sheet_id,
-                    sheet_gid,
-                    sheet_tab,
-                )
-                df = data_to_dataframe(data)
+            if connection_ok and df is not None:
                 st.markdown(f'<span class="status-connected">✅ Connected to {region_label} Google Sheet</span>', unsafe_allow_html=True)
                 st.markdown(f"**Active tab:** {loaded_tab}")
                 if len(all_tabs) > 1:
@@ -882,28 +901,26 @@ def show_bot_view(bot_mode, config):
                 st.markdown(f"**Accounts loaded:** {len(df)}")
                 st.markdown(f"**Data columns:** {len(df.columns)}")
 
-                # Auto-detect a Total MRR-ish column for the summary widget
                 mrr_col = next((c for c in df.columns if "total mrr" in c.lower()), None)
                 if mrr_col and pd.api.types.is_numeric_dtype(df[mrr_col]):
                     total_mrr = df[mrr_col].sum()
                     st.markdown(f"**Total MRR:** {currency_symbol}{total_mrr:,.2f}")
-            except Exception as e:
+            else:
                 st.markdown(f'<span class="status-error">❌ Could not connect to {region_label} Google Sheet</span>', unsafe_allow_html=True)
-                st.error(f"Error: {e}")
-                st.stop()
+                if connection_error:
+                    st.error(f"Error: {connection_error}")
         else:
-            try:
-                documents = load_drive_documents(config["google_credentials"], config["google_drive_folder_id"])
+            if connection_ok and documents is not None:
                 st.markdown(f'<span class="status-connected">✅ Connected to Google Drive</span>', unsafe_allow_html=True)
                 st.markdown(f"**Documents loaded:** {len(documents)}")
                 if documents:
                     st.markdown("**Documents found:**")
                     for doc in documents:
                         st.markdown(f"- {doc['name']}")
-            except Exception as e:
+            else:
                 st.markdown(f'<span class="status-error">❌ Could not connect to Google Drive</span>', unsafe_allow_html=True)
-                st.error(f"Error: {e}")
-                st.stop()
+                if connection_error:
+                    st.error(f"Error: {connection_error}")
 
         st.markdown("---")
         if st.button("🔄 Refresh Data", use_container_width=True):
@@ -984,7 +1001,14 @@ def show_bot_view(bot_mode, config):
     else:
         placeholder = "Ask me about a process or procedure..."
 
+    # Show a warning in the main area if the data connection failed
+    if not connection_ok:
+        st.warning(f"⚠️ Could not connect to the data source. Please check your secrets configuration and click **Refresh Data** in the sidebar to retry.")
+
     if prompt := st.chat_input(placeholder):
+        if not connection_ok:
+            st.error("Cannot process questions without a data connection. Please fix the connection and refresh.")
+            st.stop()
         with st.chat_message("user"):
             st.markdown(prompt)
         st.session_state[current_key].append({"role": "user", "content": prompt})
