@@ -276,10 +276,17 @@ st.markdown(f"""
     }}
     
     /* Make sidebar toggle arrows white so they are visible */
+    [data-testid="collapsedControl"] svg,
+    [data-testid="collapsedControl"] path,
+    [data-testid="stSidebarCollapseButton"] svg,
+    [data-testid="stSidebarCollapseButton"] path,
     button[kind="headerNoPadding"] svg,
-    [data-testid="collapsedControl"] svg {{
+    button[kind="headerNoPadding"] path,
+    button[kind="header"] svg,
+    button[kind="header"] path {{
         fill: #ffffff !important;
         color: #ffffff !important;
+        stroke: #ffffff !important;
     }}
 </style>
 """, unsafe_allow_html=True)
