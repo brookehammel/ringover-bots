@@ -773,7 +773,7 @@ def ask_claude_with_dataframe(client, question, system_prompt, chat_history, df,
 def show_landing_page():
     show_logo(max_width_px=340)
 
-    st.markdown('<div class="landing-question">SELECT YOUR BOT BELOW</div>', unsafe_allow_html=True)
+    st.markdown('<div class="landing-question">Which bot do you need to talk to?</div>', unsafe_allow_html=True)
     st.markdown('<div class="landing-subtitle">Choose a bot below to get started.</div>', unsafe_allow_html=True)
 
     col_left, col_us, col_gap1, col_uk, col_gap2, col_process, col_right = st.columns([0.5, 3, 0.3, 3, 0.3, 3, 0.5])
