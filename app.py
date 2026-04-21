@@ -265,12 +265,21 @@ st.markdown(f"""
         background-color: transparent;
         height: 0;
     }}
+    
     /* Always keep the sidebar toggle button visible */
     [data-testid="stSidebar"][aria-expanded="false"] {{
         min-width: 0 !important;
     }}
+    
     button[kind="headerNoPadding"] {{
         visibility: visible !important;
+    }}
+    
+    /* Make sidebar toggle arrows white so they are visible */
+    button[kind="headerNoPadding"] svg,
+    [data-testid="collapsedControl"] svg {{
+        fill: #ffffff !important;
+        color: #ffffff !important;
     }}
 </style>
 """, unsafe_allow_html=True)
@@ -858,7 +867,7 @@ def show_bot_view(bot_mode, config):
                 st.markdown(f'<span class="status-error">❌ Could not connect...</span>', unsafe_allow_html=True)
                 if connection_error: st.error(connection_error)
 
-    # 5. RENDER THE MAIN CHAT UI (The rest of your existing code goes here)
+    # 5. RENDER THE MAIN CHAT UI
     if bot_mode == "bob":
         st.markdown('<div class="main-header">USA Book of Business Bot</div>', unsafe_allow_html=True)
         st.markdown('<div class="sub-header">Ask me anything about the US Book of Business.</div>', unsafe_allow_html=True)
