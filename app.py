@@ -1,17 +1,3 @@
-Since you are new to coding, trying to find exact line numbers and highlight specific chunks of text is incredibly frustrating. If you accidentally highlight one extra space or delete a single parenthesis, the whole app will break. 
-
-To make this completely stress-free, **I have put the entire, complete, updated code below.** You do not need to figure out what to replace. 
-
-Here is exactly what you need to do:
-1. Open your code file in GitHub.
-2. Click the little "pencil" icon to edit the file.
-3. Click anywhere inside the text box, press **Ctrl + A** (or **Cmd + A** on Mac) to highlight absolutely everything, and hit **Delete**.
-4. Copy the *entire* block of code below.
-5. Paste it into your now-empty GitHub file, scroll down, and click **Commit changes**.
-
-Here is your full, complete, working script:
-
-```python
 import streamlit as st
 import gspread
 from google.oauth2.service_account import Credentials
