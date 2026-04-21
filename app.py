@@ -928,15 +928,18 @@ def show_bot_view(bot_mode, config):
 def main():
     config = load_credentials()
 
+    # 1. Wait here until the correct password is entered
     if not check_password(config["app_password"]):
         st.stop()
 
-    # Track which view we're on
+    # 2. Set the default page to "landing" so it doesn't crash
     if "view" not in st.session_state:
         st.session_state["view"] = "landing"
 
+    # 3. Read which page we should be on
     view = st.session_state["view"]
 
+    # 4. Route the user to the correct page
     if view == "landing":
         show_landing_page()
     elif view == "bob":
