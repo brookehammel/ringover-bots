@@ -258,10 +258,24 @@ st.markdown(f"""
         opacity: 0.85;
     }}
 
-    /* Hide the default Streamlit header/footer branding */
+    /* Hide the default Streamlit header/footer branding but keep sidebar toggle */
     #MainMenu {{ visibility: hidden; }}
     footer {{ visibility: hidden; }}
-    header {{ visibility: hidden; }}
+    [data-testid="stHeader"] {{
+        background-color: transparent;
+        height: 0;
+    }}
+    [data-testid="stHeader"] > div:first-child {{
+        visibility: hidden;
+        height: 0;
+    }}
+    /* Always keep the sidebar toggle button visible */
+    [data-testid="stSidebar"][aria-expanded="false"] {{
+        min-width: 0 !important;
+    }}
+    button[kind="headerNoPadding"] {{
+        visibility: visible !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -772,6 +786,12 @@ def ask_claude_with_dataframe(client, question, system_prompt, chat_history, df,
 # ============================================================
 
 def show_landing_page():
+    # Keep sidebar present (even if minimal) so it doesn't auto-collapse
+    with st.sidebar:
+        show_logo(max_width_px=180)
+        st.markdown("---")
+        st.markdown("Select a bot from the main page to get started.")
+
     show_logo(max_width_px=340)
 
     st.markdown('<div class="landing-question">Which bot do you need to talk to?</div>', unsafe_allow_html=True)
