@@ -44,6 +44,18 @@ st.markdown(f"""
         color: {WHITE};
     }}
 
+    /* ==========================================
+       FIX: FORCE PASSWORD INSTRUCTION TO WHITE
+       ========================================== */
+    div[data-baseweb="input"] + div, 
+    div[data-testid="stMarkdownContainer"] small,
+    .stTextInput small,
+    .stTextInput label {{
+        color: #FFFFFF !important;
+        opacity: 1 !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+    }}
+
     /* Sidebar */
     [data-testid="stSidebar"] {{
         background-color: #00122a;
@@ -55,7 +67,7 @@ st.markdown(f"""
     /* Text input */
     .stTextInput input {{
         background-color: #00122a;
-        color: {WHITE};
+        color: {WHITE} !important;
         border: 1px solid {TEAL};
         border-radius: 6px;
     }}
@@ -140,7 +152,7 @@ st.markdown(f"""
         color: {WHITE} !important;
     }}
 
-    /* Main content area text — force white on navy (aggressive overrides) */
+    /* Main content area text — force white on navy */
     html body .main .block-container,
     html body .main .block-container div,
     html body .main .block-container p,
@@ -173,7 +185,7 @@ st.markdown(f"""
         color: {TEAL} !important;
     }}
 
-    /* Keep button text in its intended color (overrides above) */
+    /* Keep button text in its intended color */
     html body .stButton > button,
     html body .stButton > button * {{
         color: {NAVY} !important;
@@ -189,76 +201,7 @@ st.markdown(f"""
         color: {NAVY} !important;
     }}
 
-    /* Custom classes */
-    .main-header {{
-        font-family: 'Poppins', sans-serif;
-        font-size: 2rem;
-        font-weight: 700;
-        color: {WHITE};
-        margin-bottom: 0.25rem;
-    }}
-    .sub-header {{
-        font-family: 'Poppins', sans-serif;
-        font-size: 1rem;
-        color: #b8d4e3;
-        margin-bottom: 1.5rem;
-    }}
-    .status-connected {{ color: {TEAL}; font-weight: 600; }}
-    .status-error {{ color: #ff6b6b; font-weight: 600; }}
-
-    /* Landing page styling */
-    .landing-question {{
-        font-family: 'Poppins', sans-serif;
-        font-size: 2.2rem;
-        font-weight: 600;
-        color: {WHITE};
-        text-align: center;
-        margin: 2rem 0 2.5rem 0;
-    }}
-    .landing-subtitle {{
-        font-family: 'Poppins', sans-serif;
-        font-size: 1.05rem;
-        font-weight: 300;
-        color: #b8d4e3;
-        text-align: center;
-        margin-bottom: 3rem;
-    }}
-
-    /* Big landing buttons */
-    .big-bot-button {{
-        display: block;
-        width: 100%;
-        background-color: {TEAL};
-        color: {NAVY} !important;
-        font-family: 'Poppins', sans-serif;
-        font-size: 1.4rem;
-        font-weight: 600;
-        text-align: center;
-        padding: 2.5rem 1rem;
-        border-radius: 14px;
-        text-decoration: none !important;
-        transition: all 0.25s ease;
-        border: 2px solid {TEAL};
-    }}
-    .big-bot-button:hover {{
-        background-color: {NAVY};
-        color: {TEAL} !important;
-        border: 2px solid {TEAL};
-        transform: translateY(-3px);
-    }}
-    .big-bot-emoji {{
-        font-size: 2.5rem;
-        display: block;
-        margin-bottom: 0.5rem;
-    }}
-    .big-bot-caption {{
-        font-size: 0.9rem;
-        font-weight: 400;
-        margin-top: 0.5rem;
-        opacity: 0.85;
-    }}
-
-    /* Hide the default Streamlit header/footer branding but keep sidebar toggle */
+    /* Hide the default Streamlit header/footer branding */
     #MainMenu {{ visibility: hidden; }}
     footer {{ visibility: hidden; }}
     [data-testid="stHeader"] {{
@@ -266,23 +209,18 @@ st.markdown(f"""
         height: 0;
     }}
     
-    /* Always keep the sidebar toggle button visible */
-    [data-testid="stSidebar"][aria-expanded="false"] {{
-        min-width: 0 !important;
-    }}
-    
     button[kind="headerNoPadding"] {{
         visibility: visible !important;
     }}
     
-   /* The Nuclear Option: Force ALL icons in the header and sidebar controls to be white */
-    html body [data-testid="stHeader"] button *,
-    html body [data-testid="collapsedControl"] *,
-    html body [data-testid="stSidebarCollapseButton"] * {{
-        fill: #ffffff !important;
-        color: #ffffff !important;
-        stroke: #ffffff !important;
-    }}
+   /* Force header controls to white */
+   html body [data-testid="stHeader"] button *,
+   html body [data-testid="collapsedControl"] *,
+   html body [data-testid="stSidebarCollapseButton"] * {{
+       fill: #ffffff !important;
+       color: #ffffff !important;
+       stroke: #ffffff !important;
+   }}
 </style>
 """, unsafe_allow_html=True)
 
