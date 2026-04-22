@@ -643,8 +643,8 @@ def show_landing_page():
 
     show_logo(max_width_px=340)
 
-    st.markdown('<div class="landing-question">Which bot do you need to talk to?</div>', unsafe_allow_html=True)
-    st.markdown('<div class="landing-subtitle">Choose a bot below to get started.</div>', unsafe_allow_html=True)
+    st.markdown('<div class="landing-question" style="text-align: center; font-weight: 800; font-size: 2.8rem;">Which bot do you need to talk to?</div>', unsafe_allow_html=True)
+    st.markdown('<div class="landing-subtitle" style="text-align: center; font-size: 1.2rem;">Choose a bot below to get started.</div>', unsafe_allow_html=True)
 
     col_left, col_us, col_gap1, col_uk, col_gap2, col_process, col_right = st.columns([0.5, 3, 0.3, 3, 0.3, 3, 0.5])
 
