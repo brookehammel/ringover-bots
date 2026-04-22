@@ -70,113 +70,6 @@ st.markdown(f"""
         border-radius: 6px;
     }}
 
-    /* Chat input — light background */
-    [data-testid="stChatInput"] {{
-        background-color: {WHITE} !important;
-        border-radius: 8px;
-    }}
-    [data-testid="stChatInput"] > div {{
-        background-color: {WHITE} !important;
-        border: 1px solid {TEAL} !important;
-        border-radius: 8px;
-    }}
-    .stChatInput textarea, [data-testid="stChatInput"] textarea {{
-        background-color: {WHITE} !important;
-        color: {NAVY} !important;
-        border: none !important;
-        caret-color: {NAVY} !important;
-    }}
-    .stChatInput textarea::placeholder, [data-testid="stChatInput"] textarea::placeholder {{
-        color: #8a9ba8 !important;
-    }}
-    /* Send button inside chat input */
-    [data-testid="stChatInput"] button {{
-        color: {NAVY} !important;
-    }}
-    [data-testid="stChatInput"] button svg {{
-        fill: {NAVY} !important;
-    }}
-
-    /* Default Streamlit buttons */
-    .stButton > button {{
-        background-color: {TEAL};
-        color: {NAVY};
-        font-family: 'Poppins', sans-serif;
-        font-weight: 600;
-        border: none;
-        border-radius: 8px;
-        padding: 0.6rem 1.4rem;
-        transition: all 0.2s ease;
-    }}
-    .stButton > button:hover {{
-        background-color: {WHITE};
-        color: {NAVY};
-        transform: translateY(-1px);
-    }}
-
-    /* Chat messages */
-    [data-testid="stChatMessage"] {{
-        background-color: #002a4f !important;
-        border-radius: 10px;
-        padding: 0.5rem 1rem;
-    }}
-    [data-testid="stChatMessage"] *,
-    [data-testid="stChatMessage"] p,
-    [data-testid="stChatMessage"] li,
-    [data-testid="stChatMessage"] span,
-    [data-testid="stChatMessage"] strong,
-    [data-testid="stChatMessage"] em,
-    [data-testid="stChatMessage"] h1,
-    [data-testid="stChatMessage"] h2,
-    [data-testid="stChatMessage"] h3,
-    [data-testid="stChatMessage"] h4,
-    [data-testid="stChatMessage"] h5,
-    [data-testid="stChatMessage"] h6,
-    [data-testid="stChatMessage"] td,
-    [data-testid="stChatMessage"] th {{
-        color: {WHITE} !important;
-    }}
-    [data-testid="stChatMessage"] a {{
-        color: {TEAL} !important;
-    }}
-    [data-testid="stChatMessage"] code {{
-        background-color: #00122a !important;
-        color: {TEAL} !important;
-        padding: 2px 6px;
-        border-radius: 4px;
-    }}
-    [data-testid="stChatMessage"] pre code {{
-        background-color: #00122a !important;
-        color: {WHITE} !important;
-    }}
-
-    /* Main content area text force white */
-    html body .main .block-container,
-    html body .main .block-container div,
-    html body .main .block-container p,
-    html body .main .block-container li,
-    html body .main .block-container span,
-    html body .main .block-container h1,
-    html body .main .block-container h2,
-    html body .main .block-container h3,
-    html body .main .block-container h4,
-    html body .main .block-container h5,
-    html body .main .block-container h6,
-    html body .main .block-container td,
-    html body .main .block-container th,
-    html body .main .block-container label,
-    html body .stMarkdown,
-    html body .stMarkdown *,
-    html body [data-testid="stMarkdownContainer"],
-    html body [data-testid="stMarkdownContainer"] *,
-    html body [data-testid="stChatMessageContent"],
-    html body [data-testid="stChatMessageContent"] *,
-    html body [data-testid="stSpinner"],
-    html body [data-testid="stSpinner"] *,
-    html body [data-testid="stSpinner"] div {{
-        color: {WHITE} !important;
-    }}
-
     /* Bot Page Headers - FORCE SIZE AND BOLDNESS */
     .main-header {{
         font-family: 'Poppins', sans-serif !important;
@@ -185,7 +78,7 @@ st.markdown(f"""
         color: #ffffff !important;
         margin-bottom: 0.5rem !important;
         display: block !important;
-    }
+    }}
 
     .sub-header {{
         font-family: 'Poppins', sans-serif !important;
