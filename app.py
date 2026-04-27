@@ -802,19 +802,112 @@ def load_drive_documents(_credentials, folder_id):
     return documents
 
 
-def documents_to_summary(documents):
-    """Build a text summary of all documents for the Process Bot system prompt.
+def _score_document(doc, keywords):
+    """Score a document's relevance to a question based on keyword matches.
+    Returns a numeric score — higher is more relevant."""
+    name_lower = doc["name"].lower()
+    content_lower = doc["content"].lower()
+    score = 0
 
-    Per-document limit: 80,000 chars so long docs aren't silently truncated.
-    Total limit across ALL docs: 500,000 chars to use Claude's context window generously.
-    """
+    for kw in keywords:
+        # Matches in document name are worth more (title relevance)
+        if kw in name_lower:
+            score += 10
+        # Count occurrences in content (capped to avoid one keyword dominating)
+        count = content_lower.count(kw)
+        score += min(count, 20)
+
+    return score
+
+
+def _extract_keywords(question):
+    """Extract meaningful keywords from a question for document matching."""
+    # Common words to ignore
+    stop_words = {
+        "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+        "have", "has", "had", "do", "does", "did", "will", "would", "could",
+        "should", "may", "might", "shall", "can", "need", "dare", "ought",
+        "used", "to", "of", "in", "for", "on", "with", "at", "by", "from",
+        "as", "into", "through", "during", "before", "after", "above", "below",
+        "between", "out", "off", "over", "under", "again", "further", "then",
+        "once", "here", "there", "when", "where", "why", "how", "all", "both",
+        "each", "few", "more", "most", "other", "some", "such", "no", "nor",
+        "not", "only", "own", "same", "so", "than", "too", "very", "just",
+        "about", "what", "which", "who", "whom", "this", "that", "these",
+        "those", "am", "if", "or", "and", "but", "because", "until", "while",
+        "it", "its", "i", "me", "my", "we", "our", "you", "your", "he", "she",
+        "they", "them", "his", "her", "us", "tell", "show", "give", "get",
+        "find", "know", "think", "see", "want", "look", "make", "go", "say",
+        "let", "please", "also", "like", "much", "many", "well", "still",
+    }
+
+    # Split on non-alphanumeric, lowercase, remove short/stop words
+    words = re.split(r"[^a-zA-Z0-9]+", question.lower())
+    keywords = [w for w in words if len(w) > 2 and w not in stop_words]
+
+    # Also include 2-word and 3-word phrases from the original question for better matching
+    q_lower = question.lower()
+    words_raw = re.split(r"[^a-zA-Z0-9]+", q_lower)
+    words_raw = [w for w in words_raw if w]
+    for i in range(len(words_raw) - 1):
+        phrase = words_raw[i] + " " + words_raw[i + 1]
+        if words_raw[i] not in stop_words or words_raw[i + 1] not in stop_words:
+            keywords.append(phrase)
+    for i in range(len(words_raw) - 2):
+        phrase = words_raw[i] + " " + words_raw[i + 1] + " " + words_raw[i + 2]
+        keywords.append(phrase)
+
+    return keywords
+
+
+def filter_relevant_documents(documents, question, chat_history=None, max_docs=15):
+    """Filter documents by keyword relevance to the question.
+    Also considers recent chat history so follow-ups pull the same docs."""
+
+    # Build keyword list from the current question
+    keywords = _extract_keywords(question)
+
+    # Also extract keywords from recent conversation for follow-up context
+    if chat_history:
+        recent = chat_history[-4:]  # last 2 Q&A pairs
+        for msg in recent:
+            if msg["role"] == "user":
+                keywords.extend(_extract_keywords(msg["content"]))
+            elif msg["role"] == "assistant":
+                # Extract any document names mentioned in previous answers
+                for doc in documents:
+                    if doc["name"].lower() in msg["content"].lower():
+                        # Boost this doc heavily by adding its name words as keywords
+                        name_words = re.split(r"[^a-zA-Z0-9]+", doc["name"].lower())
+                        keywords.extend([w for w in name_words if len(w) > 2])
+
+    if not keywords:
+        # No meaningful keywords — return first max_docs documents
+        return documents[:max_docs]
+
+    # Score and rank all documents
+    scored = [(doc, _score_document(doc, keywords)) for doc in documents]
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    # Take top matches (only those with score > 0)
+    relevant = [doc for doc, score in scored[:max_docs] if score > 0]
+
+    if not relevant:
+        # No keyword matches at all — return first max_docs as fallback
+        return documents[:max_docs]
+
+    return relevant
+
+
+def documents_to_summary(documents):
+    """Build a text summary of the provided documents for the system prompt."""
     if not documents:
         return "No documents found in the Google Drive folder."
 
     MAX_PER_DOC = 80000
-    MAX_TOTAL = 500000
+    MAX_TOTAL = 200000
 
-    summary = f"Found {len(documents)} documents in the process folder:\n\n"
+    summary = f"Providing {len(documents)} documents:\n\n"
     total_chars = len(summary)
 
     for i, doc in enumerate(documents):
@@ -831,10 +924,6 @@ def documents_to_summary(documents):
             if remaining > len(header) + 200:
                 section = header + content[:remaining - len(header) - 60] + "\n... [Truncated to fit context limit]\n\n"
                 summary += section
-            else:
-                summary += f"--- DOCUMENT: {doc['name']} ---\n[Skipped — context limit reached]\n\n"
-            for rd in documents[i + 1:]:
-                summary += f"--- DOCUMENT: {rd['name']} ---\n[Skipped — context limit reached]\n\n"
             break
 
         summary += section
@@ -849,14 +938,15 @@ You have access to process documents from the team's Google Drive folder.
 Your job is to answer questions about company processes, procedures, and guidelines by finding
 the answer in the documents provided below.
 
-IMPORTANT RULES:
-- Always base your answers on the actual documents provided below. Never make up processes or procedures.
-- When you find an answer, tell the user which document it came from (e.g., "According to the Client Onboarding doc...").
-- If the answer spans multiple documents, reference all of them.
-- If you cannot find the answer in any document, say so clearly and suggest which type of document might contain the answer.
-- Be conversational and helpful. These are your colleagues.
-- If a process has specific steps, list them clearly in order.
-- If you notice conflicting information between documents, flag it to the user.
+CRITICAL RULES — YOU MUST FOLLOW THESE:
+1. ONLY answer using information found in the documents below. If the answer is not in these documents, say "I couldn't find that information in the available documents" — do NOT guess or make up an answer.
+2. When you find an answer, ALWAYS cite the exact document name (e.g., "According to 'Tips and Tricks for creating a purchase order'...").
+3. Quote or closely paraphrase the relevant text from the document so the user can verify your answer.
+4. If the answer spans multiple documents, reference all of them.
+5. If a process has specific steps, list them clearly in order exactly as they appear in the document.
+6. If you notice conflicting information between documents, flag it to the user.
+7. Be conversational and helpful. These are your colleagues.
+8. NEVER fabricate process steps, terms, definitions, or procedures that are not explicitly written in the documents.
 
 HERE ARE THE CURRENT PROCESS DOCUMENTS:
 {data}
@@ -1197,7 +1287,12 @@ def show_bot_view(bot_mode, config):
                             df,
                         )
                     else:
-                        doc_summary = documents_to_summary(documents)
+                        relevant_docs = filter_relevant_documents(
+                            documents,
+                            prompt,
+                            chat_history=st.session_state[current_key][:-1],
+                        )
+                        doc_summary = documents_to_summary(relevant_docs)
                         system = PROCESS_SYSTEM_PROMPT.format(data=doc_summary)
                         response = ask_claude(
                             claude_client,
