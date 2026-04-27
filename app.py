@@ -693,17 +693,16 @@ def _read_uploaded_file(service, file_id, name, mime):
         return f"[Unsupported file type: {mime}]"
 
 
-# --- Phase 1: Build document index (names + previews, lightweight) ---
+# --- Load all documents from Drive (simple approach — all docs in every prompt) ---
 
 @st.cache_data(ttl=600)
-def load_drive_index(_credentials, folder_id):
-    """Load ALL documents from Drive but only store name + short preview + file ID.
-    Full content is loaded on-demand in Phase 2."""
+def load_drive_documents(_credentials, folder_id):
+    """Load ALL documents from Drive with full content.
+    Supports Google-native formats + PDF, Word, PowerPoint, Excel."""
     creds = get_google_creds(_credentials)
     service = build("drive", "v3", credentials=creds)
 
-    PREVIEW_LENGTH = 600  # chars of preview per doc for the index
-    doc_index = []  # list of {"name", "file_id", "mime", "preview"}
+    documents = []
 
     def read_folder(fid):
         page_token = None
@@ -793,125 +792,55 @@ def load_drive_index(_credentials, folder_id):
                         content = "[Could not resolve this shortcut]"
 
                 if content is not None:
-                    preview = content[:PREVIEW_LENGTH].strip()
-                    if len(content) > PREVIEW_LENGTH:
-                        preview += "..."
-                    doc_index.append({
-                        "name": name,
-                        "file_id": file_id,
-                        "mime": mime,
-                        "preview": preview,
-                        "full_content": content,  # cached in memory for Phase 2
-                    })
+                    documents.append({"name": name, "content": content})
 
             page_token = results.get("nextPageToken")
             if not page_token:
                 break
 
     read_folder(folder_id)
-    return doc_index
+    return documents
 
 
-# --- Phase 2: Smart document selection ---
+def documents_to_summary(documents):
+    """Build a text summary of all documents for the Process Bot system prompt.
 
-def build_doc_catalog(doc_index):
-    """Build a compact catalog string listing all documents with previews for Claude to search."""
-    lines = [f"DOCUMENT CATALOG ({len(doc_index)} documents available):\n"]
-    for i, doc in enumerate(doc_index):
-        lines.append(f"[{i}] {doc['name']}")
-        lines.append(f"    Preview: {doc['preview'][:300]}")
-        lines.append("")
-    return "\n".join(lines)
+    Per-document limit: 80,000 chars so long docs aren't silently truncated.
+    Total limit across ALL docs: 500,000 chars to use Claude's context window generously.
+    """
+    if not documents:
+        return "No documents found in the Google Drive folder."
 
-
-DOC_SELECTOR_PROMPT = """You are a document retrieval assistant. Given a user's question (and possibly their recent conversation history), select the documents most likely to contain the answer.
-
-RULES:
-- Return ONLY a JSON array of document index numbers, e.g. [0, 3, 7]
-- Select between 1 and 8 documents — pick more if the question is broad
-- Choose based on document names AND preview content
-- Pay close attention to conversation history — if the user is asking follow-up questions, ALWAYS include the same documents that were relevant to the previous questions
-- If unsure, include more rather than fewer
-- Return ONLY the JSON array, nothing else
-
-DOCUMENT CATALOG:
-{catalog}
-"""
-
-
-def select_relevant_documents(client, api_key, question, doc_index, chat_history=None):
-    """Use Claude to pick which documents are relevant to the user's question.
-    Includes recent chat history so follow-up questions pull the same docs."""
-    catalog = build_doc_catalog(doc_index)
-
-    # Build the message with conversation context
-    messages = []
-    if chat_history:
-        # Include last few exchanges so the selector understands the conversation topic
-        recent = chat_history[-6:]  # last 3 Q&A pairs
-        for msg in recent:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-    messages.append({"role": "user", "content": question})
-
-    selector_client = anthropic.Anthropic(api_key=api_key)
-    response = selector_client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=256,
-        system=DOC_SELECTOR_PROMPT.format(catalog=catalog),
-        messages=messages,
-    )
-
-    response_text = response.content[0].text.strip()
-
-    # Parse the JSON array of indices
-    try:
-        # Handle cases where Claude wraps in markdown code blocks
-        if "```" in response_text:
-            response_text = response_text.split("```")[1]
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-        indices = json.loads(response_text)
-        if not isinstance(indices, list):
-            indices = list(range(min(8, len(doc_index))))
-    except (json.JSONDecodeError, IndexError):
-        # Fallback: select first 8 docs
-        indices = list(range(min(8, len(doc_index))))
-
-    # Clamp to valid range
-    valid_indices = [i for i in indices if 0 <= i < len(doc_index)]
-    if not valid_indices:
-        valid_indices = list(range(min(8, len(doc_index))))
-
-    return valid_indices
-
-
-def build_selected_docs_context(doc_index, selected_indices):
-    """Build the full text context from selected documents only."""
     MAX_PER_DOC = 80000
-    MAX_TOTAL = 180000
+    MAX_TOTAL = 500000
 
-    parts = [f"Loaded {len(selected_indices)} of {len(doc_index)} total documents (selected as most relevant):\n\n"]
-    total = len(parts[0])
+    summary = f"Found {len(documents)} documents in the process folder:\n\n"
+    total_chars = len(summary)
 
-    for idx in selected_indices:
-        doc = doc_index[idx]
-        content = doc["full_content"]
+    for i, doc in enumerate(documents):
+        header = f"--- DOCUMENT: {doc['name']} ---\n"
+        content = doc["content"]
+
         if len(content) > MAX_PER_DOC:
             content = content[:MAX_PER_DOC] + "\n... [Document truncated due to length]"
 
-        section = f"--- DOCUMENT: {doc['name']} ---\n{content}\n\n"
+        section = header + content + "\n\n"
 
-        if total + len(section) > MAX_TOTAL:
-            remaining = MAX_TOTAL - total
-            if remaining > 200:
-                section = f"--- DOCUMENT: {doc['name']} ---\n{content[:remaining - 100]}\n... [Truncated]\n\n"
-                parts.append(section)
+        if total_chars + len(section) > MAX_TOTAL:
+            remaining = MAX_TOTAL - total_chars
+            if remaining > len(header) + 200:
+                section = header + content[:remaining - len(header) - 60] + "\n... [Truncated to fit context limit]\n\n"
+                summary += section
+            else:
+                summary += f"--- DOCUMENT: {doc['name']} ---\n[Skipped — context limit reached]\n\n"
+            for rd in documents[i + 1:]:
+                summary += f"--- DOCUMENT: {rd['name']} ---\n[Skipped — context limit reached]\n\n"
             break
 
-        parts.append(section)
-        total += len(section)
+        summary += section
+        total_chars += len(section)
 
-    return "".join(parts)
+    return summary
 
 
 PROCESS_SYSTEM_PROMPT = """You are the Ringover Process Bot — a helpful assistant for the Ringover US team.
@@ -929,7 +858,7 @@ IMPORTANT RULES:
 - If a process has specific steps, list them clearly in order.
 - If you notice conflicting information between documents, flag it to the user.
 
-HERE ARE THE RELEVANT PROCESS DOCUMENTS:
+HERE ARE THE CURRENT PROCESS DOCUMENTS:
 {data}
 """
 
@@ -1112,7 +1041,7 @@ def show_bot_view(bot_mode, config):
         loaded_tab = ""
         all_tabs = []
         try:
-            documents = load_drive_index(config["google_credentials"], config["google_drive_folder_id"])
+            documents = load_drive_documents(config["google_credentials"], config["google_drive_folder_id"])
             connection_ok = True
         except Exception as e:
             connection_error = str(e)
@@ -1268,16 +1197,8 @@ def show_bot_view(bot_mode, config):
                             df,
                         )
                     else:
-                        # Phase 2: Smart doc selection — pick relevant docs, then answer
-                        selected_indices = select_relevant_documents(
-                            claude_client,
-                            config["anthropic_api_key"],
-                            prompt,
-                            documents,
-                            chat_history=st.session_state[current_key][:-1],
-                        )
-                        doc_context = build_selected_docs_context(documents, selected_indices)
-                        system = PROCESS_SYSTEM_PROMPT.format(data=doc_context)
+                        doc_summary = documents_to_summary(documents)
+                        system = PROCESS_SYSTEM_PROMPT.format(data=doc_summary)
                         response = ask_claude(
                             claude_client,
                             prompt,
