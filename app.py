@@ -567,144 +567,340 @@ def run_pandas_query(df, expression):
 # PROCESS BOT
 # ============================================================
 
+# --- Helpers to read non-Google-native file types ---
+
+def _download_file_bytes(service, file_id):
+    """Download a non-Google-native file from Drive and return raw bytes."""
+    request = service.files().get_media(fileId=file_id)
+    buffer = io.BytesIO()
+    downloader = MediaIoBaseDownload(buffer, request)
+    done = False
+    while not done:
+        _, done = downloader.next_chunk()
+    buffer.seek(0)
+    return buffer
+
+
+def _read_pdf(buffer):
+    """Extract text from a PDF file buffer."""
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(buffer)
+        pages = []
+        for page in reader.pages:
+            text = page.extract_text()
+            if text:
+                pages.append(text)
+        return "\n\n".join(pages) if pages else "[PDF contained no extractable text]"
+    except Exception as e:
+        return f"[Could not read PDF: {e}]"
+
+
+def _read_docx(buffer):
+    """Extract text from a Word .docx file buffer."""
+    try:
+        import docx
+        doc = docx.Document(buffer)
+        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+        # Also read tables
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells]
+                paragraphs.append(" | ".join(cells))
+        return "\n".join(paragraphs) if paragraphs else "[Word document was empty]"
+    except Exception as e:
+        return f"[Could not read Word document: {e}]"
+
+
+def _read_pptx(buffer):
+    """Extract text from a PowerPoint .pptx file buffer."""
+    try:
+        from pptx import Presentation
+        prs = Presentation(buffer)
+        slides_text = []
+        for i, slide in enumerate(prs.slides, 1):
+            texts = []
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for para in shape.text_frame.paragraphs:
+                        text = para.text.strip()
+                        if text:
+                            texts.append(text)
+                if shape.has_table:
+                    for row in shape.table.rows:
+                        cells = [cell.text.strip() for cell in row.cells]
+                        texts.append(" | ".join(cells))
+            if texts:
+                slides_text.append(f"[Slide {i}]\n" + "\n".join(texts))
+        return "\n\n".join(slides_text) if slides_text else "[Presentation was empty]"
+    except Exception as e:
+        return f"[Could not read PowerPoint: {e}]"
+
+
+def _read_xlsx(buffer):
+    """Extract text from an Excel .xlsx file buffer."""
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(buffer, data_only=True)
+        sheets_text = []
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            rows = []
+            for row in ws.iter_rows(values_only=True):
+                cells = [str(c) if c is not None else "" for c in row]
+                if any(cells):
+                    rows.append(" | ".join(cells))
+            if rows:
+                sheets_text.append(f"[Sheet: {sheet_name}]\n" + "\n".join(rows))
+        return "\n\n".join(sheets_text) if sheets_text else "[Spreadsheet was empty]"
+    except Exception as e:
+        return f"[Could not read Excel file: {e}]"
+
+
+def _read_uploaded_file(service, file_id, name, mime):
+    """Read a non-Google-native file uploaded to Drive (PDF, docx, pptx, xlsx, etc.)."""
+    try:
+        buffer = _download_file_bytes(service, file_id)
+    except Exception as e:
+        return f"[Could not download file: {e}]"
+
+    lower_name = name.lower()
+
+    # PDF
+    if mime == "application/pdf" or lower_name.endswith(".pdf"):
+        return _read_pdf(buffer)
+
+    # Word
+    if mime in ("application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "application/msword") or lower_name.endswith((".docx", ".doc")):
+        return _read_docx(buffer)
+
+    # PowerPoint
+    if mime in ("application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                "application/vnd.ms-powerpoint") or lower_name.endswith((".pptx", ".ppt")):
+        return _read_pptx(buffer)
+
+    # Excel
+    if mime in ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "application/vnd.ms-excel") or lower_name.endswith((".xlsx", ".xls")):
+        return _read_xlsx(buffer)
+
+    # Plain text fallback
+    try:
+        buffer.seek(0)
+        return buffer.read().decode("utf-8", errors="replace")
+    except Exception:
+        return f"[Unsupported file type: {mime}]"
+
+
+# --- Phase 1: Build document index (names + previews, lightweight) ---
+
 @st.cache_data(ttl=600)
-def load_drive_documents(_credentials, folder_id):
+def load_drive_index(_credentials, folder_id):
+    """Load ALL documents from Drive but only store name + short preview + file ID.
+    Full content is loaded on-demand in Phase 2."""
     creds = get_google_creds(_credentials)
     service = build("drive", "v3", credentials=creds)
 
-    documents = []
+    PREVIEW_LENGTH = 600  # chars of preview per doc for the index
+    doc_index = []  # list of {"name", "file_id", "mime", "preview"}
 
     def read_folder(fid):
-        query = f"'{fid}' in parents and trashed = false"
-        results = service.files().list(
-            q=query,
-            fields="files(id, name, mimeType)",
-            pageSize=100
-        ).execute()
-        files = results.get("files", [])
+        page_token = None
+        while True:
+            query = f"'{fid}' in parents and trashed = false"
+            results = service.files().list(
+                q=query,
+                fields="nextPageToken, files(id, name, mimeType)",
+                pageSize=100,
+                pageToken=page_token,
+            ).execute()
+            files = results.get("files", [])
 
-        for file in files:
-            mime = file["mimeType"]
-            name = file["name"]
-            file_id = file["id"]
+            for file in files:
+                mime = file["mimeType"]
+                name = file["name"]
+                file_id = file["id"]
 
-            if mime == "application/vnd.google-apps.folder":
-                read_folder(file_id)
-                continue
+                if mime == "application/vnd.google-apps.folder":
+                    read_folder(file_id)
+                    continue
 
-            if mime == "application/vnd.google-apps.document":
-                try:
-                    content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
-                    if isinstance(content, bytes):
-                        content = content.decode("utf-8")
-                    documents.append({"name": name, "content": content})
-                except Exception:
-                    documents.append({"name": name, "content": "[Could not read this document]"})
+                content = None
 
-            elif mime in ["text/plain", "text/csv", "text/markdown"]:
-                try:
-                    request = service.files().get_media(fileId=file_id)
-                    buffer = io.BytesIO()
-                    downloader = MediaIoBaseDownload(buffer, request)
-                    done = False
-                    while not done:
-                        _, done = downloader.next_chunk()
-                    content = buffer.getvalue().decode("utf-8", errors="replace")
-                    documents.append({"name": name, "content": content})
-                except Exception:
-                    documents.append({"name": name, "content": "[Could not read this file]"})
+                # Google Docs
+                if mime == "application/vnd.google-apps.document":
+                    try:
+                        raw = service.files().export(fileId=file_id, mimeType="text/plain").execute()
+                        content = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                    except Exception:
+                        content = "[Could not read this document]"
 
-            elif mime == "application/vnd.google-apps.spreadsheet":
-                try:
-                    content = service.files().export(fileId=file_id, mimeType="text/csv").execute()
-                    if isinstance(content, bytes):
-                        content = content.decode("utf-8")
-                    documents.append({"name": name, "content": content})
-                except Exception:
-                    documents.append({"name": name, "content": "[Could not read this spreadsheet]"})
+                # Google Sheets
+                elif mime == "application/vnd.google-apps.spreadsheet":
+                    try:
+                        raw = service.files().export(fileId=file_id, mimeType="text/csv").execute()
+                        content = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                    except Exception:
+                        content = "[Could not read this spreadsheet]"
 
-            elif mime == "application/vnd.google-apps.presentation":
-                try:
-                    content = service.files().export(fileId=file_id, mimeType="text/plain").execute()
-                    if isinstance(content, bytes):
-                        content = content.decode("utf-8")
-                    documents.append({"name": name, "content": content})
-                except Exception:
-                    documents.append({"name": name, "content": "[Could not read this presentation]"})
+                # Google Slides
+                elif mime == "application/vnd.google-apps.presentation":
+                    try:
+                        raw = service.files().export(fileId=file_id, mimeType="text/plain").execute()
+                        content = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                    except Exception:
+                        content = "[Could not read this presentation]"
 
-            elif mime == "application/vnd.google-apps.shortcut":
-                try:
-                    shortcut_details = service.files().get(fileId=file_id, fields="shortcutDetails").execute()
-                    target_id = shortcut_details.get("shortcutDetails", {}).get("targetId")
-                    target_mime = shortcut_details.get("shortcutDetails", {}).get("targetMimeType", "")
+                # Plain text / CSV / Markdown
+                elif mime in ("text/plain", "text/csv", "text/markdown"):
+                    try:
+                        buf = _download_file_bytes(service, file_id)
+                        content = buf.read().decode("utf-8", errors="replace")
+                    except Exception:
+                        content = "[Could not read this file]"
 
-                    if target_id:
-                        if target_mime == "application/vnd.google-apps.document":
-                            content = service.files().export(fileId=target_id, mimeType="text/plain").execute()
-                            if isinstance(content, bytes):
-                                content = content.decode("utf-8")
-                            documents.append({"name": name + " (shortcut)", "content": content})
-                        elif target_mime == "application/vnd.google-apps.folder":
-                            read_folder(target_id)
-                        elif target_mime == "application/vnd.google-apps.spreadsheet":
-                            content = service.files().export(fileId=target_id, mimeType="text/csv").execute()
-                            if isinstance(content, bytes):
-                                content = content.decode("utf-8")
-                            documents.append({"name": name + " (shortcut)", "content": content})
-                        elif target_mime == "application/vnd.google-apps.presentation":
-                            content = service.files().export(fileId=target_id, mimeType="text/plain").execute()
-                            if isinstance(content, bytes):
-                                content = content.decode("utf-8")
-                            documents.append({"name": name + " (shortcut)", "content": content})
-                except Exception:
-                    documents.append({"name": name, "content": "[Could not resolve this shortcut]"})
+                # PDF, Word, PowerPoint, Excel (uploaded files)
+                elif (mime.startswith("application/pdf")
+                      or mime.startswith("application/vnd.openxmlformats")
+                      or mime.startswith("application/msword")
+                      or mime.startswith("application/vnd.ms-")
+                      or name.lower().endswith((".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls"))):
+                    content = _read_uploaded_file(service, file_id, name, mime)
+
+                # Shortcuts
+                elif mime == "application/vnd.google-apps.shortcut":
+                    try:
+                        details = service.files().get(fileId=file_id, fields="shortcutDetails").execute()
+                        target_id = details.get("shortcutDetails", {}).get("targetId")
+                        target_mime = details.get("shortcutDetails", {}).get("targetMimeType", "")
+                        if target_id:
+                            if target_mime == "application/vnd.google-apps.document":
+                                raw = service.files().export(fileId=target_id, mimeType="text/plain").execute()
+                                content = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                            elif target_mime == "application/vnd.google-apps.folder":
+                                read_folder(target_id)
+                                continue
+                            elif target_mime == "application/vnd.google-apps.spreadsheet":
+                                raw = service.files().export(fileId=target_id, mimeType="text/csv").execute()
+                                content = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                            elif target_mime == "application/vnd.google-apps.presentation":
+                                raw = service.files().export(fileId=target_id, mimeType="text/plain").execute()
+                                content = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                            else:
+                                content = _read_uploaded_file(service, target_id, name, target_mime)
+                    except Exception:
+                        content = "[Could not resolve this shortcut]"
+
+                if content is not None:
+                    preview = content[:PREVIEW_LENGTH].strip()
+                    if len(content) > PREVIEW_LENGTH:
+                        preview += "..."
+                    doc_index.append({
+                        "name": name,
+                        "file_id": file_id,
+                        "mime": mime,
+                        "preview": preview,
+                        "full_content": content,  # cached in memory for Phase 2
+                    })
+
+            page_token = results.get("nextPageToken")
+            if not page_token:
+                break
 
     read_folder(folder_id)
-    return documents
+    return doc_index
 
 
-def documents_to_summary(documents):
-    """Build a text summary of all documents for the Process Bot system prompt.
+# --- Phase 2: Smart document selection ---
 
-    Per-document limit: 80,000 chars (up from 15k) so long docs aren't silently truncated.
-    Total limit across ALL docs: 180,000 chars to stay within Claude's context window.
-    """
-    if not documents:
-        return "No documents found in the Google Drive folder."
+def build_doc_catalog(doc_index):
+    """Build a compact catalog string listing all documents with previews for Claude to search."""
+    lines = [f"DOCUMENT CATALOG ({len(doc_index)} documents available):\n"]
+    for i, doc in enumerate(doc_index):
+        lines.append(f"[{i}] {doc['name']}")
+        lines.append(f"    Preview: {doc['preview'][:300]}")
+        lines.append("")
+    return "\n".join(lines)
 
+
+DOC_SELECTOR_PROMPT = """You are a document retrieval assistant. Given a user's question and a catalog of available documents, select the documents most likely to contain the answer.
+
+RULES:
+- Return ONLY a JSON array of document index numbers, e.g. [0, 3, 7]
+- Select between 1 and 8 documents — pick more if the question is broad
+- Choose based on document names AND preview content
+- If unsure, include more rather than fewer
+- Return ONLY the JSON array, nothing else
+
+DOCUMENT CATALOG:
+{catalog}
+"""
+
+
+def select_relevant_documents(client, api_key, question, doc_index):
+    """Use Claude to pick which documents are relevant to the user's question."""
+    catalog = build_doc_catalog(doc_index)
+
+    selector_client = anthropic.Anthropic(api_key=api_key)
+    response = selector_client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=256,
+        system=DOC_SELECTOR_PROMPT.format(catalog=catalog),
+        messages=[{"role": "user", "content": question}],
+    )
+
+    response_text = response.content[0].text.strip()
+
+    # Parse the JSON array of indices
+    try:
+        # Handle cases where Claude wraps in markdown code blocks
+        if "```" in response_text:
+            response_text = response_text.split("```")[1]
+            if response_text.startswith("json"):
+                response_text = response_text[4:]
+        indices = json.loads(response_text)
+        if not isinstance(indices, list):
+            indices = list(range(min(8, len(doc_index))))
+    except (json.JSONDecodeError, IndexError):
+        # Fallback: select first 8 docs
+        indices = list(range(min(8, len(doc_index))))
+
+    # Clamp to valid range
+    valid_indices = [i for i in indices if 0 <= i < len(doc_index)]
+    if not valid_indices:
+        valid_indices = list(range(min(8, len(doc_index))))
+
+    return valid_indices
+
+
+def build_selected_docs_context(doc_index, selected_indices):
+    """Build the full text context from selected documents only."""
     MAX_PER_DOC = 80000
     MAX_TOTAL = 180000
 
-    summary = f"Found {len(documents)} documents in the process folder:\n\n"
-    total_chars = len(summary)
+    parts = [f"Loaded {len(selected_indices)} of {len(doc_index)} total documents (selected as most relevant):\n\n"]
+    total = len(parts[0])
 
-    for doc in documents:
-        header = f"--- DOCUMENT: {doc['name']} ---\n"
-        content = doc["content"]
-
+    for idx in selected_indices:
+        doc = doc_index[idx]
+        content = doc["full_content"]
         if len(content) > MAX_PER_DOC:
             content = content[:MAX_PER_DOC] + "\n... [Document truncated due to length]"
 
-        section = header + content + "\n\n"
+        section = f"--- DOCUMENT: {doc['name']} ---\n{content}\n\n"
 
-        if total_chars + len(section) > MAX_TOTAL:
-            # Include as much of this doc as possible within the total budget
-            remaining = MAX_TOTAL - total_chars
-            if remaining > len(header) + 200:
-                section = header + content[:remaining - len(header) - 60] + "\n... [Truncated to fit context limit]\n\n"
-                summary += section
-            else:
-                summary += f"--- DOCUMENT: {doc['name']} ---\n[Skipped — context limit reached]\n\n"
-            # Mark remaining docs as skipped
-            remaining_docs = documents[documents.index(doc) + 1:]
-            for rd in remaining_docs:
-                summary += f"--- DOCUMENT: {rd['name']} ---\n[Skipped — context limit reached]\n\n"
+        if total + len(section) > MAX_TOTAL:
+            remaining = MAX_TOTAL - total
+            if remaining > 200:
+                section = f"--- DOCUMENT: {doc['name']} ---\n{content[:remaining - 100]}\n... [Truncated]\n\n"
+                parts.append(section)
             break
 
-        summary += section
-        total_chars += len(section)
+        parts.append(section)
+        total += len(section)
 
-    return summary
+    return "".join(parts)
 
 
 PROCESS_SYSTEM_PROMPT = """You are the Ringover Process Bot — a helpful assistant for the Ringover US team.
@@ -722,7 +918,7 @@ IMPORTANT RULES:
 - If a process has specific steps, list them clearly in order.
 - If you notice conflicting information between documents, flag it to the user.
 
-HERE ARE THE CURRENT PROCESS DOCUMENTS:
+HERE ARE THE RELEVANT PROCESS DOCUMENTS:
 {data}
 """
 
@@ -905,7 +1101,7 @@ def show_bot_view(bot_mode, config):
         loaded_tab = ""
         all_tabs = []
         try:
-            documents = load_drive_documents(config["google_credentials"], config["google_drive_folder_id"])
+            documents = load_drive_index(config["google_credentials"], config["google_drive_folder_id"])
             connection_ok = True
         except Exception as e:
             connection_error = str(e)
@@ -1061,8 +1257,15 @@ def show_bot_view(bot_mode, config):
                             df,
                         )
                     else:
-                        doc_summary = documents_to_summary(documents)
-                        system = PROCESS_SYSTEM_PROMPT.format(data=doc_summary)
+                        # Phase 2: Smart doc selection — pick relevant docs, then answer
+                        selected_indices = select_relevant_documents(
+                            claude_client,
+                            config["anthropic_api_key"],
+                            prompt,
+                            documents,
+                        )
+                        doc_context = build_selected_docs_context(documents, selected_indices)
+                        system = PROCESS_SYSTEM_PROMPT.format(data=doc_context)
                         response = ask_claude(
                             claude_client,
                             prompt,
