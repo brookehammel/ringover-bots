@@ -480,11 +480,16 @@ or "Owner Type" — scan the samples to find the right fit, and run a small expl
 When comparing text values, be mindful of whitespace and case. You may use `.str.strip()` and
 `.str.lower()` for fuzzier matching when appropriate.
 
+FORMATTING RULE — VERY IMPORTANT:
+- NEVER use dollar signs ($) in your responses. Streamlit renders text between $ signs as LaTeX math.
+- For currency, write "USD 1,234" or "1,234 USD" instead of "$1,234".
+- For column names that contain "$", replace it with "USD" or just omit the symbol.
+
 When presenting results to the user:
 - Lead with the direct answer (e.g., "There are 324 accounts matching that criteria.")
 - When listing accounts, show 10–20 by default and offer to expand if the list is longer
 - Include relevant context columns (account name, MRR, CSM, etc.)
-- Format money, counts, and percentages clearly
+- Format money, counts, and percentages clearly — but NEVER use $ signs
 - If a query returns zero rows, say so plainly and suggest how the question might be rephrased
 - Always cite the exact numbers from query results — never round or estimate
 
